@@ -192,6 +192,58 @@ class DailyRequirementTests(unittest.TestCase):
             self.assertNotIn(forbidden, dashboard[0]["text"])
             self.assertIn("ISW Key Takeaways正文渲染数量：0", audit)
 
+    def test_isw_integrity_failure_does_not_claim_transport_failure(self) -> None:
+        """A successful fetch with invalid counts must remain distinct from a transport failure."""
+        malformed_success = {
+            "status": "success",
+            "fetch_method": "官网直连",
+            "title": "Iran Update, August 4, 2026",
+            "published_at_et": "2026-08-04 18:30",
+            "published_at_bj": "2026-08-05 06:30",
+            "url": "https://understandingwar.org/research/middle-east/iran-update-august-4-2026/",
+            "source_key_takeaways": ["source one", "source two"],
+            "key_takeaways_zh": ["单条翻译"],
+            "source_key_takeaways_count": 2,
+            "translated_key_takeaways_count": 1,
+        }
+        actual_failure = {
+            "status": "failed",
+            "failure_reason": "network timeout",
+            "listing_url": "https://understandingwar.org/research/",
+        }
+        empty_review = {"groups": [], "windows": []}
+
+        malformed_markdown = "\n".join(
+            tracking_report._tracking_outlook_lines(malformed_success)
+        )
+        malformed_audit = "\n".join(
+            tracking_report._new_requirement_audit_lines(
+                empty_review, malformed_success, "Asia/Shanghai"
+            )
+        )
+        failed_markdown = "\n".join(
+            tracking_report._tracking_outlook_lines(actual_failure)
+        )
+        failed_audit = "\n".join(
+            tracking_report._new_requirement_audit_lines(
+                empty_review, actual_failure, "Asia/Shanghai"
+            )
+        )
+
+        self.assertIn("抓取成功，但 ISW Key Takeaways 完整性校验失败", malformed_markdown)
+        self.assertNotIn("指定网站本次抓取失败", malformed_markdown)
+        self.assertNotRegex(malformed_markdown, r"(?m)^\d+\. ")
+        self.assertIn("外部网站是否抓取成功：是", malformed_audit)
+        self.assertIn("ISW Key Takeaways完整性校验：失败", malformed_audit)
+        self.assertIn("原文、翻译及声明数量必须为正数且完全一致", malformed_audit)
+        self.assertNotIn("外部update失败原因：未知", malformed_audit)
+
+        self.assertIn("指定网站本次抓取失败", failed_markdown)
+        self.assertIn("network timeout", failed_markdown)
+        self.assertNotIn("抓取成功，但", failed_markdown)
+        self.assertIn("外部网站是否抓取成功：否", failed_audit)
+        self.assertIn("外部update失败原因：network timeout", failed_audit)
+
     def test_news_direction_uses_new_fact_instead_of_price_or_risk_keyword(self) -> None:
         denial = market_bias_for_event(
             "伊拉克组织否认袭击沙特石油设施",

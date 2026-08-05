@@ -4691,13 +4691,19 @@ def _validated_isw_key_takeaways(
         == source_count
         == translated_count
     ):
-        return [], "ISW Key Takeaways完整性校验失败：原文、翻译及声明数量必须为正数且完全一致。"
+        return [], "ISW Key Takeaways 完整性校验失败：原文、翻译及声明数量必须为正数且完全一致。"
     return [str(item) for item in translated_items], ""
 
 
 def _tracking_outlook_lines(external_update: dict[str, object]) -> list[str]:
     source_url = str(external_update.get("url") or external_update.get("listing_url") or ISW_LISTING_URL)
     key_takeaways, failure_reason = _validated_isw_key_takeaways(external_update)
+    fetch_success = external_update.get("status") == "success"
+    display_failure = (
+        f"抓取成功，但 {failure_reason}"
+        if fetch_success and not key_takeaways
+        else failure_reason
+    )
     lines = [
         "## ISW Iran Update",
         "",
@@ -4712,12 +4718,16 @@ def _tracking_outlook_lines(external_update: dict[str, object]) -> list[str]:
         for index, item in enumerate(key_takeaways, 1):
             lines.append(f"{index}. {item}")
     else:
-        lines.append(f"- {failure_reason}")
+        lines.append(f"- {display_failure}")
 
-    isw_watch = _first_isw_takeaway_text(key_takeaways) if key_takeaways else failure_reason
+    isw_watch = _first_isw_takeaway_text(key_takeaways) if key_takeaways else display_failure
     lines.extend(["", "## 今日关注什么", ""])
     if not key_takeaways:
-        lines.append("- 指定网站本次抓取失败，以下内容根据已获取的相关新闻和ISW信息整理。")
+        lines.append(
+            "- 抓取成功，但ISW Key Takeaways未通过完整性校验；以下监测清单不引用未校验内容。"
+            if fetch_success
+            else "- 指定网站本次抓取失败，以下内容根据已获取的相关新闻和ISW信息整理。"
+        )
     lines.extend(
         [
             "- 霍尔木兹海峡是否继续通行，以及是否出现收费、封锁或护航安排变化；",
@@ -4986,8 +4996,9 @@ def _new_requirement_audit_lines(
         for group in groups
         if group.get("cumulative_pct") is None or group.get("max_30m_pct") is None
     ]
-    validated_takeaways, _isw_failure_reason = _validated_isw_key_takeaways(external_update)
-    external_success = bool(validated_takeaways)
+    validated_takeaways, isw_failure_reason = _validated_isw_key_takeaways(external_update)
+    fetch_success = external_update.get("status") == "success"
+    integrity_success = bool(validated_takeaways)
 
     lines = [
         "## 8. 本次新增需求专项审计",
@@ -5035,16 +5046,21 @@ def _new_requirement_audit_lines(
             "",
             "### 外部网站update审计",
             "",
-            f"- 外部网站是否抓取成功：{'是' if external_success else '否'}。",
+            f"- 外部网站是否抓取成功：{'是' if fetch_success else '否'}。",
             f"- 抓取通道：{external_update.get('fetch_method') or 'N/A'}。",
             f"- 外部update网页发布/更新时间（纽约）：{external_update.get('published_at_et') or 'N/A'}。",
             f"- 外部update换算时间（北京）：{external_update.get('published_at_bj') or 'N/A'}。",
             f"- 外部update标题：{external_update.get('title') or 'N/A'}。",
             f"- 外部update链接：{external_update.get('url') or ISW_LISTING_URL}。",
-            f"- 外部内容是否成功翻译并写入“今日关注什么”：{'是' if external_success else '否'}。",
+            f"- ISW Key Takeaways完整性校验：{'通过' if integrity_success else '失败' if fetch_success else '未执行'}。",
+            f"- 外部内容是否成功翻译并写入“今日关注什么”：{'是' if integrity_success else '否'}。",
         ]
     )
-    if not external_success:
+    if fetch_success and not integrity_success:
+        lines.append(
+            f"- ISW Key Takeaways完整性校验失败原因：{isw_failure_reason.rstrip('。')}。"
+        )
+    if not fetch_success:
         lines.append(f"- 外部update失败原因：{external_update.get('failure_reason') or '未知'}。")
     lines.append("")
     return lines

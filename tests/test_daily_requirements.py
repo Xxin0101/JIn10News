@@ -1543,6 +1543,14 @@ class DailyRequirementTests(unittest.TestCase):
         self.assertEqual(parsed, items)
         self.assertNotIn("Body paragraph must not be collected.", parsed)
 
+    def test_article_key_takeaways_preserves_repeated_official_items(self) -> None:
+        repeated = "Repeated official takeaway must remain a separate source item."
+        page = "\n".join(["Key Takeaways", repeated, repeated, "Iran"])
+
+        parsed = _article_key_takeaways(page)
+
+        self.assertEqual(parsed, [repeated, repeated])
+
     def test_isw_translation_count_mismatch_marks_update_failed(self) -> None:
         cutoff = datetime(2026, 8, 5, 0, 0, tzinfo=UTC)
         source = {

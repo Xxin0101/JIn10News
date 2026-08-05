@@ -174,7 +174,7 @@ def _article_key_takeaways(page: str) -> list[str]:
             break
         if line.startswith(("Download the PDF", "Information Cutoff", "The Critical Threats Project")):
             continue
-        if len(line) >= 20 and line not in collected:
+        if len(line) >= 20:
             collected.append(line)
     return collected
 

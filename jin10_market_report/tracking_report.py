@@ -5811,7 +5811,12 @@ def _isw_markdown_dashboard_items(lines: list[str]) -> list[dict[str, str]]:
     section = _formal_section(
         lines,
         "ISW Iran Update",
-        ("今日关注什么", "接下来关注什么"),
+        (
+            "今日重点（Executive Summary）",
+            "特朗普相关言论",
+            "今日关注什么",
+            "接下来关注什么",
+        ),
     )
     if not section:
         return []
@@ -5822,6 +5827,23 @@ def _isw_markdown_dashboard_items(lines: list[str]) -> list[dict[str, str]]:
             source_url = url_match.group(1)
             break
     items: list[dict[str, str]] = []
+    publication_line = next(
+        (
+            line.strip()[2:].strip()
+            for line in section
+            if line.strip().startswith("- 更新时间：")
+        ),
+        "",
+    )
+    if publication_line:
+        items.append(
+            {
+                "text": publication_line,
+                "url": source_url,
+                "link_label": "查看ISW原文",
+                "kind": "metadata",
+            }
+        )
     for line in section:
         stripped = line.strip()
         if stripped == ISW_FAILURE_COPY:
@@ -5830,6 +5852,7 @@ def _isw_markdown_dashboard_items(lines: list[str]) -> list[dict[str, str]]:
                     "text": stripped,
                     "url": source_url,
                     "link_label": "查看ISW列表",
+                    "kind": "status",
                 }
             )
             continue
@@ -5841,12 +5864,13 @@ def _isw_markdown_dashboard_items(lines: list[str]) -> list[dict[str, str]]:
         if text not in {item["text"] for item in items}:
             items.append(
                 {
-                    "text": _brief_text(text, 150),
+                    "text": text,
                     "url": source_url,
                     "link_label": "查看ISW原文",
+                    "kind": "takeaway" if numbered else "status",
                 }
             )
-    return items[:7]
+    return items
 
 
 def _concise_isw_dashboard_text(text: str) -> str:
@@ -5863,6 +5887,7 @@ def _isw_dashboard_items(external_update: dict[str, object]) -> list[dict[str, s
                 "text": failure_reason,
                 "url": source_url,
                 "link_label": "查看ISW列表",
+                "kind": "status",
             }
         ]
 
@@ -5875,18 +5900,92 @@ def _isw_dashboard_items(external_update: dict[str, object]) -> list[dict[str, s
                 "text": f"原文发布日期：纽约时间 {published_et or 'N/A'} / 北京时间 {published_bj or 'N/A'}",
                 "url": source_url,
                 "link_label": "查看ISW原文",
+                "kind": "metadata",
             }
         )
     for text in key_takeaways:
         concise = _concise_isw_dashboard_text(str(text))
         if concise:
-            items.append({"text": concise, "url": source_url, "link_label": "查看ISW原文"})
+            items.append(
+                {
+                    "text": concise,
+                    "url": source_url,
+                    "link_label": "查看ISW原文",
+                    "kind": "takeaway",
+                }
+            )
     if not items:
         items.append(
             {
                 "text": "ISW专题暂无可提炼摘要，保留原文入口供人工核对。",
                 "url": source_url,
                 "link_label": "查看ISW原文",
+                "kind": "status",
+            }
+        )
+    return items
+
+
+def _trump_markdown_dashboard_items(lines: list[str]) -> list[dict[str, object]]:
+    section = _formal_section(
+        lines,
+        "特朗普相关言论",
+        (
+            "今日重点（Executive Summary）",
+            "ISW Iran Update",
+            "今日关注什么",
+            "接下来关注什么",
+        ),
+    )
+    if not section:
+        return []
+    statement_starts = [
+        index
+        for index, line in enumerate(section)
+        if re.match(r"^###\s+.+?｜.+$", line.strip())
+    ]
+    if not statement_starts:
+        status_items = [
+            line.strip()[2:].strip()
+            for line in section
+            if line.strip().startswith("- ")
+        ]
+        return [
+            {"text": item, "topics": [], "source_items": []}
+            for item in status_items
+        ]
+
+    items: list[dict[str, object]] = []
+    for position, start in enumerate(statement_starts):
+        end = statement_starts[position + 1] if position + 1 < len(statement_starts) else len(section)
+        block = section[start:end]
+        heading = re.match(r"^###\s+(.+?)｜(.+)$", block[0].strip())
+        if not heading:
+            continue
+        body_lines = [
+            line.strip()
+            for line in block[1:]
+            if line.strip() and not line.strip().startswith("- 金十来源：")
+        ]
+        source_items: list[dict[str, str]] = []
+        for line in block[1:]:
+            source_match = re.match(r"^-\s*金十来源：\[([^\]]+)\]\(([^)]+)\)$", line.strip())
+            if not source_match:
+                continue
+            source_url = _valid_jin10_display_url(source_match.group(2))
+            if source_url:
+                source_items.append(
+                    {
+                        "title": source_match.group(1),
+                        "source_url": source_url,
+                    }
+                )
+        items.append(
+            {
+                "published_at_bj": heading.group(1).strip(),
+                "topics": [topic.strip() for topic in heading.group(2).split("、") if topic.strip()],
+                "text": "\n".join(body_lines),
+                "source_items": source_items,
             }
         )
     return items
@@ -5902,9 +6001,11 @@ def _parse_formal_dashboard(
         lines,
         "本窗口Brent价格异动复盘",
         (
+            "今日重点（Executive Summary）",
             "价格异动但新闻解释不足",
             "未充分定价的重大风险",
             "市场主要驱动与下一时段判断",
+            "特朗普相关言论",
             "ISW Iran Update",
             "今日关注什么",
             "接下来关注什么",
@@ -5914,8 +6015,10 @@ def _parse_formal_dashboard(
         lines,
         "价格异动但新闻解释不足",
         (
+            "今日重点（Executive Summary）",
             "未充分定价的重大风险",
             "市场主要驱动与下一时段判断",
+            "特朗普相关言论",
             "ISW Iran Update",
             "今日关注什么",
             "接下来关注什么",
@@ -5957,18 +6060,50 @@ def _parse_formal_dashboard(
         "数据覆盖范围",
         ("本窗口Brent表现",),
     )
+    markdown_top_summary_items = _formal_bullet_items(
+        lines,
+        "今日重点（Executive Summary）",
+        (
+            "标的信息",
+            "数据覆盖范围",
+            "本窗口Brent表现",
+            "本窗口Brent价格异动复盘",
+            "价格异动但新闻解释不足",
+            "未充分定价的重大风险",
+            "市场主要驱动与下一时段判断",
+            "特朗普相关言论",
+            "ISW Iran Update",
+            "今日关注什么",
+            "接下来关注什么",
+        ),
+    )
+    markdown_trump_items = _trump_markdown_dashboard_items(lines)
     markdown_isw_items = _isw_markdown_dashboard_items(lines)
     today_watch_items = [
         {"text": item, "url": ""}
         for item in _formal_bullet_items(
             lines,
             "今日关注什么",
-            ("接下来关注什么",),
+            (
+                "今日重点（Executive Summary）",
+                "特朗普相关言论",
+                "接下来关注什么",
+            ),
         )
     ]
     return {
         "title": title,
         "meta": meta,
+        "top_summary_items": (
+            list(presentation.top_summary_items)
+            if presentation and presentation.top_summary_items
+            else markdown_top_summary_items
+        ),
+        "trump_items": (
+            list(presentation.trump_items)
+            if presentation and presentation.trump_items
+            else markdown_trump_items
+        ),
         "instrument_items": instrument_items,
         "coverage_items": coverage_items,
         "warning": warning,
@@ -6226,6 +6361,10 @@ def _embedded_chart_html(
 
 def _formal_dashboard_body(markdown_path: Path, dashboard: dict[str, object]) -> list[str]:
     lines = [f'<main class="report-shell"><h1>{_inline_markdown_html(str(dashboard["title"]))}</h1>']
+    lines.append('<section class="executive-summary" aria-label="今日重点"><h2>今日重点</h2><ul>')
+    for item in dashboard.get("top_summary_items") or []:
+        lines.append(f'<li data-summary-item="true">{_inline_markdown_html(str(item))}</li>')
+    lines.append("</ul></section>")
     meta = list(dashboard.get("meta") or [])
     if meta:
         lines.append('<div class="report-meta">')
@@ -6265,15 +6404,65 @@ def _formal_dashboard_body(markdown_path: Path, dashboard: dict[str, object]) ->
         '<p class="news-panel-empty">点击上方K线图中的蓝色新闻时间点，查看该时段的相关新闻与市场解读。</p>'
         "</div>"
     )
+    lines.append('<section id="trump-card" class="trump-card"><h2>特朗普相关言论</h2>')
+    for item in list(dashboard.get("trump_items") or []):
+        published_at_bj = html.escape(str(item.get("published_at_bj") or ""))
+        topics = [html.escape(str(topic)) for topic in item.get("topics") or []]
+        lines.append('<article class="trump-statement" data-trump-statement="true">')
+        if published_at_bj or topics:
+            lines.append('<div class="statement-meta">')
+            if published_at_bj:
+                lines.append(f'<time>{published_at_bj} 北京时间</time>')
+            if topics:
+                lines.append('<span class="topic-list">')
+                lines.extend(f'<span class="topic-chip">{topic}</span>' for topic in topics)
+                lines.append('</span>')
+            lines.append('</div>')
+        lines.append(f'<p class="statement-text">{html.escape(str(item.get("text") or ""))}</p>')
+        source_links: list[str] = []
+        for source in item.get("source_items") or []:
+            if not isinstance(source, Mapping):
+                continue
+            source_url = _valid_jin10_display_url(source.get("source_url") or source.get("url"))
+            if not source_url:
+                continue
+            source_title = html.escape(str(source.get("title") or "查看金十原文"))
+            source_links.append(
+                f'<li><a href="{html.escape(source_url, quote=True)}" target="_blank" '
+                f'rel="noopener noreferrer">{source_title} ↗</a></li>'
+            )
+        if source_links:
+            lines.append('<ul class="statement-sources">')
+            lines.extend(source_links)
+            lines.append('</ul>')
+        lines.append('</article>')
+    lines.append('</section>')
     lines.append('<div class="summary-grid">')
     lines.append('<section id="iran-update-card" class="summary-card"><h2>ISW Iran Update</h2><ul>')
-    for item in list(dashboard.get("iran_update_items") or [])[:7]:
+    for item in list(dashboard.get("iran_update_items") or []):
         text = html.escape(str(item.get("text") or ""))
         url = str(item.get("url") or "")
         label = str(item.get("link_label") or "查看ISW原文")
         if url.startswith(("https://", "http://")):
             text += f' <a href="{html.escape(url, quote=True)}" target="_blank" rel="noopener noreferrer">{html.escape(label)} ↗</a>'
-        lines.append(f"<li>{text}</li>")
+        kind = str(item.get("kind") or "")
+        legacy_non_takeaway_prefixes = (
+            "原文发布日期：",
+            "更新时间：",
+            ISW_FAILURE_COPY,
+            "抓取成功，但",
+            "ISW Key Takeaways 完整性校验失败",
+            "ISW专题暂无可提炼摘要",
+            "可手动打开ISW",
+            "若ISW恢复可用",
+            "该专题只作为",
+            "能源市场含义：",
+        )
+        is_takeaway = kind == "takeaway" if kind else not str(item.get("text") or "").startswith(
+            legacy_non_takeaway_prefixes
+        )
+        marker = ' data-isw-key-takeaway="true"' if is_takeaway else ""
+        lines.append(f"<li{marker}>{text}</li>")
     lines.append("</ul></section>")
     lines.append('<section id="tracking-card" class="summary-card"><h2>今日关注什么</h2><ul>')
     for item in list(dashboard.get("tracking_items") or []):
@@ -6340,15 +6529,17 @@ def build_html_report(
         "h1{margin:0;color:#0f2747;font-size:30px;line-height:1.25;letter-spacing:-.02em}.report-meta{margin:10px 0 28px}.report-meta p{margin:2px 0;color:var(--muted);font-size:14px}",
         "h2{margin:0;color:#152a46;font-size:19px;line-height:1.35}.section-title{margin:30px 0 12px}p{margin:8px 0;color:#334155}blockquote{margin:16px 0;padding:10px 14px;border-left:3px solid #94a3b8;background:var(--soft);color:#475569}",
         "a{color:#165dcc;text-underline-offset:3px}ul{margin:8px 0;padding-left:22px}li{margin:8px 0}",
+        ".executive-summary{margin:22px 0 16px;padding:20px 24px;border:1px solid #cbdcf1;border-left:4px solid var(--news);border-radius:14px;background:#f8fbff}.executive-summary h2{margin-bottom:10px}.executive-summary ul{margin-bottom:0}.executive-summary li{color:#273a55}",
         ".context-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:18px 0 24px}.context-card{padding:16px 18px;border:1px solid var(--line);border-radius:14px;background:var(--soft)}.context-card h2{margin-bottom:8px}.context-card ul{margin-bottom:0}.context-card li{color:#475569;font-size:13px}",
         ".market-lede{margin:22px 0 26px;padding:16px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.market-lede h2{margin:0 0 8px}.market-lede p{margin:4px 0;color:#2c3b52;font-size:15px}",
         ".metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:12px 0 22px}.metric-card{padding:18px 18px 16px;border:1px solid var(--line);border-radius:14px;background:#fff}.metric-label{display:block;margin-bottom:7px;color:var(--muted);font-size:13px}.metric-value{display:block;font:700 26px/1.15 'SFMono-Regular',Consolas,monospace;color:#152a46}.metric-value.metric-up{color:var(--up)}.metric-value.metric-down{color:var(--down)}",
         ".news-panel{min-height:92px;margin:14px 0 0;padding:18px 20px;border:1px solid #8bb7f0;border-radius:14px;background:#eff6ff;box-shadow:0 8px 22px rgba(37,99,235,.08)}.news-panel-empty{margin:14px 0;color:#315c91;text-align:center}.news-panel-title{margin:0;color:#163f75;font-size:18px}.news-display-summary{margin:5px 0 12px;color:#496581;font-size:13px}.event-summary{display:flex;flex-wrap:wrap;gap:8px 18px;margin:8px 0 12px;color:#35506f;font-size:14px}.event-reactions{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:12px 0}.event-reaction{padding:8px 10px;border:1px solid #c7dcf5;border-radius:9px;background:#fff}.event-reaction span{display:block;color:var(--muted);font-size:11px}.event-reaction strong{font:700 14px/1.3 'SFMono-Regular',Consolas,monospace}.news-list-heading{margin:16px 0 4px;color:#244b78;font-size:14px}.news-entry{padding:12px 0}.news-entry+.news-entry{border-top:1px solid #cbdcf1}.news-entry[hidden]{display:none}.news-time{color:var(--muted);font:600 12px/1.4 'SFMono-Regular',Consolas,monospace}.news-title{display:block;margin:4px 0 5px;color:#173f7a;font-size:15px;font-weight:650}.news-meta{margin:4px 0 0;color:#52647b;font-size:13px}.news-source-link{display:inline-block;margin-top:7px;font-size:13px;font-weight:650}.news-expand,.all-day-button{margin-top:10px;padding:7px 12px;border:1px solid #8eb7ea;border-radius:8px;background:#fff;color:#174d88;font:650 13px/1.2 inherit;cursor:pointer}.market-interpretation{margin-top:14px;padding-top:12px;border-top:1px solid #cbdcf1}.attribution-line{margin-top:9px;color:#244b78;font-weight:650}.unexplained-message{margin:14px 0 6px;color:#334155;font-weight:650}",
         ".chart-figure{margin:0;max-width:100%;overflow-x:auto;border:1px solid var(--line);border-radius:16px;background:#fff}.chart-figure svg{display:block;width:100%;height:auto;min-width:1040px}.unmatched-band-hit{cursor:pointer;pointer-events:all;outline:none;fill:transparent;stroke:transparent;stroke-width:2}.unmatched-band-hit:hover,.unmatched-band-hit:focus,.unmatched-band-hit.is-active{fill:rgba(148,163,184,.18);stroke:#64748b}.news-marker.is-active .marker-tag{fill:#dbeafe;stroke:#1d4ed8}.news-marker.is-active .marker-dot{r:7}",
+        ".trump-card{width:100%;margin:20px 0 0;padding:20px 22px;border:1px solid var(--line);border-radius:14px;background:#fff}.trump-card h2{margin-bottom:10px}.trump-statement{padding:14px 0}.trump-statement+.trump-statement{border-top:1px solid var(--line)}.statement-meta{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;margin-bottom:7px;color:var(--muted);font-size:13px}.statement-meta time{font-family:'SFMono-Regular',Consolas,monospace}.topic-list{display:flex;flex-wrap:wrap;gap:6px}.topic-chip{display:inline-flex;padding:3px 8px;border-radius:999px;background:#edf4ff;color:#24518a;font-size:12px;line-height:1.35}.statement-text{margin:0;color:#2f4058}.statement-sources{margin:8px 0 0}.statement-sources li{margin:4px 0;color:#52647b;font-size:13px}",
         ".summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:20px 0 0}.summary-card{padding:20px 22px;border:1px solid var(--line);border-radius:14px;background:#fff}.summary-card h2{margin-bottom:10px}.summary-card ul{margin-bottom:0}.summary-card li{color:#3d4e65}",
         ".audit-link{margin-top:34px;padding-top:22px;border-top:1px solid var(--line)}.audit-link a{display:inline-flex;padding:10px 15px;border:1px solid #b9c8db;border-radius:10px;background:#fff;color:#244b78;font-weight:650;text-decoration:none}.audit-link a:hover{background:#f5f8fc}",
         ".table-wrap{overflow-x:auto;margin:14px 0 26px;border:1px solid var(--line);border-radius:10px}table{width:100%;border-collapse:collapse;font-size:14px;white-space:nowrap}th,td{padding:9px 11px;border-bottom:1px solid #e6ebf1}",
-        "@media(max-width:820px){body{padding:0;background:#fff}.report-shell{padding:26px 16px 30px;border:0;border-radius:0;box-shadow:none}.context-grid{grid-template-columns:1fr}.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.event-reactions{grid-template-columns:repeat(2,minmax(0,1fr))}.summary-grid{grid-template-columns:1fr}.chart-figure{margin-left:-16px;margin-right:-16px;border-radius:0;padding:0 16px;border-left:0;border-right:0}h1{font-size:25px}.metric-value{font-size:22px}.news-panel{padding:16px 14px}.summary-card{padding:18px 16px}}",
+        "@media(max-width:820px){body{padding:0;background:#fff}.report-shell{padding:26px 16px 30px;border:0;border-radius:0;box-shadow:none}.executive-summary{padding:18px 16px}.context-grid{grid-template-columns:1fr}.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.event-reactions{grid-template-columns:repeat(2,minmax(0,1fr))}.summary-grid{grid-template-columns:1fr}.chart-figure{margin-left:-16px;margin-right:-16px;border-radius:0;padding:0 16px;border-left:0;border-right:0}h1{font-size:25px}.metric-value{font-size:22px}.news-panel{padding:16px 14px}.trump-card,.summary-card{padding:18px 16px}.statement-meta{align-items:flex-start;flex-direction:column}}",
         "@media print{body{padding:0;background:#fff}.report-shell{max-width:none;padding:0;border:0;box-shadow:none}.chart-figure svg{min-width:0}.news-panel{display:none}a{color:inherit;text-decoration:none}}",
     ]
     html_lines = [

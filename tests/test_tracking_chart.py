@@ -1068,6 +1068,151 @@ class TrackingChartTests(unittest.TestCase):
             self.assertIn("link.target = '_blank'", rendered)
             self.assertIn('href="Jin10_Brent_Rolling_Audit_test.html"', rendered)
 
+    def test_formal_html_renders_complete_source_collections_in_report_order_with_safe_links(self) -> None:
+        summary_urls = [f"https://example.com/summary/{index}" for index in range(1, 6)]
+        trump_urls = [f"https://flash.jin10.com/detail/trump-{index}" for index in range(1, 10)]
+        extra_trump_url = "https://flash.jin10.com/detail/trump-1-extra"
+        isw_urls = [f"https://understandingwar.org/research/middle-east/takeaway-{index}/" for index in range(1, 9)]
+        metadata_url = "https://understandingwar.org/research/middle-east/iran-update-test/"
+        summary_items = tuple(
+            f"摘要{index}：[摘要来源]({url})"
+            for index, url in enumerate(summary_urls, 1)
+        )
+        trump_items = tuple(
+            {
+                "statement_id": f"trump-{index}",
+                "published_at_bj": f"2026-08-04 {index:02d}:00:00",
+                "text": f"特朗普言论{index}。" if index > 1 else "特朗普言论1含有<script>标记。",
+                "topics": ["伊朗", f"主题{index}" if index > 1 else "主题<一>"],
+                "source_items": [
+                    {
+                        "title": f"金十来源{index}",
+                        "source_url": url,
+                    },
+                    *(
+                        [
+                            {"title": "补充金十来源", "source_url": extra_trump_url},
+                            {"title": "不安全来源", "source_url": "javascript:alert(1)"},
+                        ]
+                        if index == 1
+                        else []
+                    ),
+                ],
+            }
+            for index, url in enumerate(trump_urls, 1)
+        )
+        iran_update_items = (
+            {
+                "text": "原文发布日期：纽约时间 2026-08-04 18:00 / 北京时间 2026-08-05 06:00",
+                "url": metadata_url,
+                "link_label": "查看ISW原文",
+            },
+            *(
+                {
+                    "text": f"ISW Key Takeaway {index}。",
+                    "url": url,
+                    "link_label": "查看ISW原文",
+                }
+                for index, url in enumerate(isw_urls, 1)
+            ),
+        )
+        presentation = FormalReportPresentation(
+            panel_groups=(),
+            unmatched_major_items=(),
+            iran_update_items=iran_update_items,
+            top_summary_items=summary_items,
+            trump_items=trump_items,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            markdown = output_dir / "Jin10_Brent_Rolling_Reaction_collections.md"
+            markdown.write_text(
+                "# 日报\n\n"
+                "## 今日重点（Executive Summary）\n\n"
+                + "\n".join(f"- {item}" for item in summary_items)
+                + "\n\n"
+                "统计窗口：2026-08-04 08:00 至 2026-08-05 08:00（Asia/Shanghai）\n"
+                "数据来源：金十数据快讯｜Yahoo Finance / BZ=F / 5m\n\n"
+                "## 本窗口Brent表现\n\n"
+                "| 最新价 | 24小时涨跌幅 | 日内最高价 | 日内最低价 |\n"
+                "| ---: | ---: | ---: | ---: |\n"
+                "| 85.28 | +1.42% | 87.54 | 83.41 |\n\n"
+                "## 市场主要驱动与下一时段判断\n\n"
+                "### 本窗口市场主线\n\n"
+                "可归因线索主要集中在霍尔木兹航运风险。\n\n"
+                "## 特朗普相关言论\n\n"
+                + "\n".join(
+                    f"### 2026-08-04 {index:02d}:00:00｜伊朗、主题{index}\n\n"
+                    f"特朗普言论{index}。\n\n"
+                    f"- 金十来源：[金十来源{index}]({url})\n"
+                    for index, url in enumerate(trump_urls, 1)
+                )
+                + "\n## ISW Iran Update\n\n"
+                f"- 更新时间：纽约时间 2026-08-04 18:00 / 北京时间 2026-08-05 06:00\n"
+                "- 标题：Iran Update Test\n"
+                f"- 原文链接：{metadata_url}\n\n"
+                "**Key Takeaways：**\n\n"
+                + "\n".join(
+                    f"{index}. ISW Key Takeaway {index}。"
+                    for index in range(1, 9)
+                )
+                + "\n\n**对Brent/能源市场的关注意义：**\n\n- 这是附属监测说明，不是Key Takeaway。"
+                + "\n\n## 今日关注什么\n\n- 霍尔木兹通行。\n",
+                encoding="utf-8",
+            )
+
+            presentation_rendered = build_html_report(
+                markdown,
+                output_dir,
+                presentation=presentation,
+            ).read_text(encoding="utf-8")
+            fallback_rendered = build_html_report(markdown, output_dir).read_text(encoding="utf-8")
+            status_presentation = FormalReportPresentation(
+                panel_groups=(),
+                unmatched_major_items=(),
+                iran_update_items=(
+                    {
+                        "text": "本次ISW抓取失败，以下内容待下次运行补充。",
+                        "url": metadata_url,
+                        "link_label": "查看ISW列表",
+                    },
+                ),
+            )
+            status_rendered = build_html_report(
+                markdown,
+                output_dir,
+                presentation=status_presentation,
+            ).read_text(encoding="utf-8")
+            rendered_variants = (presentation_rendered, fallback_rendered)
+
+        for rendered in rendered_variants:
+            self.assertEqual(rendered.count('data-summary-item="true"'), 5)
+            self.assertEqual(rendered.count('data-trump-statement="true"'), 9)
+            self.assertEqual(rendered.count('data-isw-key-takeaway="true"'), 8)
+            self.assertLess(rendered.index("今日重点"), rendered.index("统计窗口"))
+            self.assertLess(rendered.index("特朗普相关言论"), rendered.index("ISW Iran Update"))
+            for url in (*summary_urls, *trump_urls, metadata_url):
+                self.assertIn(
+                    f'href="{url}" target="_blank" rel="noopener noreferrer"',
+                    rendered,
+                )
+        self.assertIn(
+            f'href="{extra_trump_url}" target="_blank" rel="noopener noreferrer"',
+            presentation_rendered,
+        )
+        self.assertNotIn("javascript:alert(1)", presentation_rendered)
+        self.assertIn("特朗普言论1含有&lt;script&gt;标记。", presentation_rendered)
+        self.assertIn("主题&lt;一&gt;", presentation_rendered)
+        self.assertIn("这是附属监测说明，不是Key Takeaway。", fallback_rendered)
+        self.assertNotIn('data-isw-key-takeaway="true">这是附属监测说明', fallback_rendered)
+        self.assertEqual(status_rendered.count('data-isw-key-takeaway="true"'), 0)
+        for url in isw_urls:
+            self.assertIn(
+                f'href="{url}" target="_blank" rel="noopener noreferrer"',
+                presentation_rendered,
+            )
+
     def test_report_keeps_instrument_and_coverage_out_of_homepage(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output_dir = Path(directory)

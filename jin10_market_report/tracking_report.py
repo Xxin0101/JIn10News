@@ -4781,6 +4781,7 @@ def _trump_dashboard_items(trump_update: dict[str, object]) -> list[dict[str, ob
     if trump_update.get("status") != "success":
         return [
             {
+                "kind": "status",
                 "status": "failed",
                 "text": f"金十特朗普专栏抓取失败：{trump_update.get('failure_reason') or '未知错误'}",
                 "source_items": [],
@@ -4793,6 +4794,7 @@ def _trump_dashboard_items(trump_update: dict[str, object]) -> list[dict[str, ob
     if not statements:
         return [
             {
+                "kind": "status",
                 "status": "empty",
                 "text": "本窗口金十特朗普专栏未发现符合主题条件的特朗普本人表态。",
                 "source_items": [],
@@ -4800,6 +4802,7 @@ def _trump_dashboard_items(trump_update: dict[str, object]) -> list[dict[str, ob
         ]
     return [
         {
+            "kind": "statement",
             "statement_id": str(statement.get("statement_id") or ""),
             "published_at_bj": str(statement.get("published_at_bj") or ""),
             "text": str(statement.get("text") or ""),
@@ -5873,11 +5876,6 @@ def _isw_markdown_dashboard_items(lines: list[str]) -> list[dict[str, str]]:
     return items
 
 
-def _concise_isw_dashboard_text(text: str) -> str:
-    sentences = [part.strip() for part in re.split(r"(?<=[。！？])", " ".join(str(text).split())) if part.strip()]
-    return "".join(sentences[:2]) if sentences else str(text).strip()
-
-
 def _isw_dashboard_items(external_update: dict[str, object]) -> list[dict[str, str]]:
     source_url = str(external_update.get("url") or external_update.get("listing_url") or ISW_LISTING_URL)
     key_takeaways, failure_reason = _validated_isw_key_takeaways(external_update)
@@ -5904,11 +5902,11 @@ def _isw_dashboard_items(external_update: dict[str, object]) -> list[dict[str, s
             }
         )
     for text in key_takeaways:
-        concise = _concise_isw_dashboard_text(str(text))
-        if concise:
+        normalized = " ".join(str(text).split())
+        if normalized:
             items.append(
                 {
-                    "text": concise,
+                    "text": normalized,
                     "url": source_url,
                     "link_label": "查看ISW原文",
                     "kind": "takeaway",
@@ -5951,7 +5949,7 @@ def _trump_markdown_dashboard_items(lines: list[str]) -> list[dict[str, object]]
             if line.strip().startswith("- ")
         ]
         return [
-            {"text": item, "topics": [], "source_items": []}
+            {"kind": "status", "text": item, "topics": [], "source_items": []}
             for item in status_items
         ]
 
@@ -5982,6 +5980,7 @@ def _trump_markdown_dashboard_items(lines: list[str]) -> list[dict[str, object]]
                 )
         items.append(
             {
+                "kind": "statement",
                 "published_at_bj": heading.group(1).strip(),
                 "topics": [topic.strip() for topic in heading.group(2).split("、") if topic.strip()],
                 "text": "\n".join(body_lines),
@@ -6038,13 +6037,28 @@ def _parse_formal_dashboard(
     logic = logic_match.group(1).strip() if logic_match else "暂无足够明确的单一交易主线"
     title = next((line[2:] for line in lines if line.startswith("# ")), "Brent滚动日报")
     meta = [line for line in lines if line.startswith(("统计窗口：", "数据来源："))][:2]
-    warning = next((line[2:] for line in lines if line.startswith("> ") and lines.index(line) < 8), "")
+    preamble_end = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if line in {"## 标的信息", "## 本窗口Brent表现"}
+        ),
+        len(lines),
+    )
+    extreme_warning_line = "> 本时段出现极端价格波动，可能与重大突发事件有关，需结合相关新闻人工判断。"
+    warning = next(
+        (
+            line[2:]
+            for line in lines[:preamble_end]
+            if line.startswith("> ") and line != extreme_warning_line
+        ),
+        "",
+    )
     extreme_notice = next(
         (
             line[2:]
             for line in lines
-            if line
-            == "> 本时段出现极端价格波动，可能与重大突发事件有关，需结合相关新闻人工判断。"
+            if line == extreme_warning_line
         ),
         "",
     )
@@ -6408,7 +6422,12 @@ def _formal_dashboard_body(markdown_path: Path, dashboard: dict[str, object]) ->
     for item in list(dashboard.get("trump_items") or []):
         published_at_bj = html.escape(str(item.get("published_at_bj") or ""))
         topics = [html.escape(str(topic)) for topic in item.get("topics") or []]
-        lines.append('<article class="trump-statement" data-trump-statement="true">')
+        kind = str(item.get("kind") or "")
+        status = str(item.get("status") or "")
+        is_status = kind == "status" or status in {"failed", "empty"}
+        statement_marker = "" if is_status else ' data-trump-statement="true"'
+        statement_class = "trump-statement trump-status" if is_status else "trump-statement"
+        lines.append(f'<article class="{statement_class}"{statement_marker}>')
         if published_at_bj or topics:
             lines.append('<div class="statement-meta">')
             if published_at_bj:

@@ -37,6 +37,7 @@ from jin10_market_report.tracking_report import (
     _tracking_outlook_lines,
     _top_summary_items,
     _top_level_warning,
+    _trump_dashboard_items,
     _unexplained_price_movement_lines,
     _audit_title,
     build_html_report,
@@ -1268,6 +1269,104 @@ class TrackingChartTests(unittest.TestCase):
             )
             self.assertLess(rendered.index('class="chart-figure"'), rendered.index('id="related-news-panel"'))
 
+    def test_formal_html_keeps_partial_and_failed_warnings_after_five_summary_items(self) -> None:
+        warnings = {
+            "PARTIAL": "本次Brent行情未达到正式日报门槛（统计窗口价格首尾未完整覆盖）。价格表现仅供参考。",
+            "FAILED": "本次金十新闻与Brent行情外部更新失败。当前内容不可作为正式结论使用。",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            for status, warning in warnings.items():
+                with self.subTest(status=status):
+                    markdown = output_dir / f"Jin10_Brent_Rolling_Reaction_warning_{status}.md"
+                    markdown.write_text(
+                        "# 日报\n\n"
+                        "## 今日重点（Executive Summary）\n\n"
+                        + "\n".join(f"- 摘要{index}" for index in range(1, 6))
+                        + "\n\n"
+                        "统计窗口：2026-08-04 08:00 至 2026-08-05 08:00（Asia/Shanghai）\n"
+                        "数据来源：金十数据快讯｜Yahoo Finance / BZ=F / 5m\n\n"
+                        f"> {warning}\n\n"
+                        "> 本时段出现极端价格波动，可能与重大突发事件有关，需结合相关新闻人工判断。\n\n"
+                        "## 标的信息\n\n- ticker: BZ=F\n\n"
+                        "## 本窗口Brent表现\n\n"
+                        "| 最新价 | 24小时涨跌幅 | 日内最高价 | 日内最低价 |\n"
+                        "| ---: | ---: | ---: | ---: |\n"
+                        "| N/A | N/A | N/A | N/A |\n",
+                        encoding="utf-8",
+                    )
+
+                    rendered = build_html_report(markdown, output_dir).read_text(encoding="utf-8")
+
+                    self.assertIn(warning, rendered)
+
+    def test_formal_html_renders_trump_failure_and_empty_status_without_statement_markers(self) -> None:
+        cases = (
+            (
+                "failure",
+                {"status": "failed", "failure_reason": "网络异常"},
+                "金十特朗普专栏抓取失败：网络异常",
+            ),
+            (
+                "empty",
+                {"status": "success", "statements": []},
+                "本窗口金十特朗普专栏未发现符合主题条件的特朗普本人表态。",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            for label, trump_update, status_text in cases:
+                with self.subTest(label=label):
+                    markdown = output_dir / f"Jin10_Brent_Rolling_Reaction_trump_{label}.md"
+                    markdown.write_text(
+                        "# 日报\n\n"
+                        "统计窗口：2026-08-04 08:00 至 2026-08-05 08:00（Asia/Shanghai）\n"
+                        "数据来源：金十数据快讯｜Yahoo Finance / BZ=F / 5m\n\n"
+                        "## 本窗口Brent表现\n\n"
+                        "| 最新价 | 24小时涨跌幅 | 日内最高价 | 日内最低价 |\n"
+                        "| ---: | ---: | ---: | ---: |\n"
+                        "| N/A | N/A | N/A | N/A |\n\n"
+                        "## 特朗普相关言论\n\n"
+                        f"- {status_text}\n\n"
+                        "## ISW Iran Update\n",
+                        encoding="utf-8",
+                    )
+                    presentation = FormalReportPresentation(
+                        panel_groups=(),
+                        unmatched_major_items=(),
+                        iran_update_items=(),
+                        trump_items=tuple(_trump_dashboard_items(trump_update)),
+                    )
+                    legacy_presentation = FormalReportPresentation(
+                        panel_groups=(),
+                        unmatched_major_items=(),
+                        iran_update_items=(),
+                        trump_items=tuple(
+                            {
+                                key: value
+                                for key, value in item.items()
+                                if key != "kind"
+                            }
+                            for item in _trump_dashboard_items(trump_update)
+                        ),
+                    )
+
+                    presentation_rendered = build_html_report(
+                        markdown,
+                        output_dir,
+                        presentation=presentation,
+                    ).read_text(encoding="utf-8")
+                    legacy_rendered = build_html_report(
+                        markdown,
+                        output_dir,
+                        presentation=legacy_presentation,
+                    ).read_text(encoding="utf-8")
+                    fallback_rendered = build_html_report(markdown, output_dir).read_text(encoding="utf-8")
+
+                    for rendered in (presentation_rendered, legacy_rendered, fallback_rendered):
+                        self.assertIn(status_text, rendered)
+                        self.assertEqual(rendered.count('data-trump-statement="true"'), 0)
+
     def test_formal_html_renders_compact_chart_dashboard(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output_dir = Path(directory)
@@ -1690,6 +1789,48 @@ class TrackingChartTests(unittest.TestCase):
 
         self.assertEqual(items[0]["text"], long_sentence)
         self.assertTrue(items[0]["text"].endswith("。"))
+
+    def test_formal_html_keeps_every_sentence_of_validated_isw_takeaway(self) -> None:
+        complete_takeaway = "第一句说明军事态势。 第二句说明航运影响！ 第三句尾部不得丢失。"
+        items = _isw_dashboard_items(
+            {
+                "status": "success",
+                "url": "https://understandingwar.org/research/middle-east/iran-update-complete/",
+                "source_key_takeaways": ["one", "two", "three"],
+                "source_key_takeaways_count": 3,
+                "translated_key_takeaways_count": 3,
+                "key_takeaways_zh": [
+                    complete_takeaway,
+                    "第二条完整译文。",
+                    "第三条完整译文。",
+                ],
+            }
+        )
+
+        self.assertEqual(items[0]["text"], complete_takeaway)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            markdown = output_dir / "Jin10_Brent_Rolling_Reaction_isw_complete.md"
+            markdown.write_text(
+                "# 日报\n\n"
+                "统计窗口：2026-08-04 08:00 至 2026-08-05 08:00（Asia/Shanghai）\n"
+                "数据来源：金十数据快讯｜Yahoo Finance / BZ=F / 5m\n",
+                encoding="utf-8",
+            )
+            presentation = FormalReportPresentation(
+                panel_groups=(),
+                unmatched_major_items=(),
+                iran_update_items=tuple(items),
+            )
+
+            rendered = build_html_report(
+                markdown,
+                output_dir,
+                presentation=presentation,
+            ).read_text(encoding="utf-8")
+
+        self.assertIn("第三句尾部不得丢失。", rendered)
 
     def test_formal_html_links_isw_listing_when_external_update_failed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

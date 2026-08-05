@@ -1694,6 +1694,38 @@ class DailyRequirementTests(unittest.TestCase):
         self.assertEqual(parsed, items)
         self.assertNotIn("Body paragraph must not be collected.", parsed)
 
+    def test_article_key_takeaways_stops_at_real_list_before_repeated_toplines_body(self) -> None:
+        items = [
+            f"Official takeaway {index} contains enough source text to remain a complete paragraph."
+            for index in range(1, 7)
+        ]
+        page = """
+        <div data-id="key-takeaways" title="Key Takeaways">
+          <div class="form-wrapper-mobile">
+            <h2>Key Takeaways</h2>
+            <ol class="wp-block-list">
+              {items}
+            </ol>
+          </div>
+        </div>
+        <div data-id="toplines" title="Toplines">
+          <h2>Toplines</h2>
+          <p><strong>{repeated}</strong> Expanded body text must not be collected.</p>
+        </div>
+        <div data-id="us-partner-operations">
+          <h2>US and Partner Military Operations</h2>
+          <p>The United States continued operations in a body paragraph that must not be collected.</p>
+        </div>
+        """.format(
+            items="\n".join(f"<li>{item}</li>" for item in items),
+            repeated=items[0],
+        )
+
+        parsed = _article_key_takeaways(page)
+
+        self.assertEqual(parsed, items)
+        self.assertNotIn("US and Partner Military Operations", parsed)
+
     def test_article_key_takeaways_preserves_repeated_official_items(self) -> None:
         repeated = "Repeated official takeaway must remain a separate source item."
         page = "\n".join(["Key Takeaways", repeated, repeated, "Iran"])

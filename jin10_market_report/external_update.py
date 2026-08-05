@@ -61,6 +61,65 @@ class _TextExtractor(HTMLParser):
         return "\n".join(" ".join(line.split()) for line in value.splitlines() if line.strip())
 
 
+class _KeyTakeawayListExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.items: list[str] = []
+        self._heading_tag = ""
+        self._heading_parts: list[str] = []
+        self._awaiting_list = False
+        self._list_depth = 0
+        self._li_depth = 0
+        self._li_parts: list[str] = []
+        self._done = False
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if self._done:
+            return
+        if tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+            if self._awaiting_list:
+                self._done = True
+                return
+            self._heading_tag = tag
+            self._heading_parts = []
+        if self._awaiting_list and tag in {"ol", "ul"}:
+            self._awaiting_list = False
+            self._list_depth = 1
+        elif self._list_depth and tag in {"ol", "ul"}:
+            self._list_depth += 1
+        if self._list_depth and tag == "li":
+            self._li_depth += 1
+            if self._li_depth == 1:
+                self._li_parts = []
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._done:
+            return
+        if tag == self._heading_tag:
+            heading = " ".join("".join(self._heading_parts).split())
+            self._heading_tag = ""
+            self._heading_parts = []
+            if heading == "Key Takeaways":
+                self._awaiting_list = True
+        if self._list_depth and tag == "li" and self._li_depth:
+            self._li_depth -= 1
+            if self._li_depth == 0:
+                item = " ".join("".join(self._li_parts).replace("\xa0", " ").split())
+                if item:
+                    self.items.append(item)
+                self._li_parts = []
+        if self._list_depth and tag in {"ol", "ul"}:
+            self._list_depth -= 1
+            if self._list_depth == 0:
+                self._done = True
+
+    def handle_data(self, data: str) -> None:
+        if self._heading_tag:
+            self._heading_parts.append(data)
+        if self._li_depth:
+            self._li_parts.append(data)
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -164,6 +223,10 @@ def _clean_source_bullet(value: str) -> str:
 
 
 def _article_key_takeaways(page: str) -> list[str]:
+    structural = _KeyTakeawayListExtractor()
+    structural.feed(page)
+    if structural.items:
+        return structural.items
     lines = [line.strip() for line in _plain_html_text(page).splitlines() if line.strip()]
     start = next((index for index, line in enumerate(lines) if line == "Key Takeaways"), None)
     if start is None:

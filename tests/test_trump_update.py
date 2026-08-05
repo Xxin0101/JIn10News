@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-from jin10_market_report.trump_update import _group_statement_items, fetch_trump_statements
+from jin10_market_report.trump_update import _group_statement_items, _normalize_item, fetch_trump_statements
 
 
 UTC = ZoneInfo("UTC")
@@ -129,7 +129,7 @@ class TrumpUpdateTests(unittest.TestCase):
         """Discarding duplicate source rows would make the grouped statement untraceable."""
         rows = [
             normalized_item(10, "2026-08-04 11:34:54", "特朗普：这是伊朗的最后机会", "特朗普称美伊谈判正在进行。"),
-            normalized_item(11, "2026-08-04 11:43:35", "特朗普：正在谈判", "特朗普称谈判已经开始，这是伊朗最后机会。"),
+            normalized_item(11, "2026-08-04 11:43:35", "特朗普：这是伊朗最后机会", "特朗普称美伊谈判正在进行，这是最后机会。"),
         ]
 
         statements = _group_statement_items(rows)
@@ -139,16 +139,30 @@ class TrumpUpdateTests(unittest.TestCase):
         self.assertIn("伊朗", statements[0]["topics"])
         self.assertNotIn("_published_dt_utc", statements[0]["source_items"][0])
 
-    def test_low_similarity_statements_with_the_same_topic_remain_separate(self) -> None:
-        """Broad topic overlap alone must not collapse independent Trump statements."""
+    def test_shared_terms_do_not_override_subthreshold_candidate_similarity(self) -> None:
+        """A matching vocabulary must not bypass the 0.72 candidate-text similarity gate."""
         rows = [
             normalized_item(20, "2026-08-04 11:34:54", "特朗普称伊朗核谈判是最后机会", "特朗普警告伊朗不要错过机会。"),
-            normalized_item(21, "2026-08-04 11:43:35", "特朗普称伊朗核谈判最后机会已经过去", "特朗普表示继续制裁。"),
+            normalized_item(21, "2026-08-04 11:43:35", "特朗普称伊朗核谈判最后机会已经过去", "特朗普表示谈判仍在继续。"),
         ]
 
         statements = _group_statement_items(rows)
 
         self.assertEqual([statement["statement_id"] for statement in statements], ["20", "21"])
+
+    def test_video_and_flash_source_url_fallbacks(self) -> None:
+        """Absent detail URLs must still lead readers to the correct original Jin10 item."""
+        video = _normalize_item(
+            {"id": 24044, "type": "video", "display_datetime": "2026-08-04 11:00:00"},
+            "Asia/Shanghai",
+        )
+        flash = _normalize_item(
+            {"id": 102829797, "type": "flash", "display_datetime": "2026-08-04 11:01:00"},
+            "Asia/Shanghai",
+        )
+
+        self.assertEqual(video["source_url"], "https://v.jin10.com/details.html?id=24044")
+        self.assertEqual(flash["source_url"], "https://xnews.jin10.com/details/flash/102829797")
 
     def test_successful_cache_is_reused_without_requesting_api(self) -> None:
         """Ignoring a successful cache would create unnecessary external API traffic."""

@@ -36,13 +36,6 @@ TOPIC_TERMS = {
 }
 
 _PUNCTUATION = re.compile(r"[\s\W_]+", re.UNICODE)
-_DIRECT_MARKER_PATTERN = re.compile("|".join(map(re.escape, DIRECT_MARKERS)))
-_FINGERPRINT_TERMS = (
-    "伊朗", "美伊", "德黑兰", "核谈判", "霍尔木兹", "海峡", "战争", "军事", "打击",
-    "空袭", "导弹", "攻击", "原油", "石油", "油价", "汽油", "能源", "油企", "埃克森",
-    "雪佛龙", "制裁", "豁免", "二级关税", "谈判", "协议", "最后机会", "开放", "关闭",
-    "降低", "上升", "下降", "出口", "封锁",
-)
 
 
 def _request_topic_page(page: int, page_size: int = 20) -> dict[str, object]:
@@ -167,30 +160,15 @@ def _is_relevant_statement(item: dict[str, object]) -> bool:
 
 
 def _normalized_comparison_text(value: str) -> str:
-    value = _DIRECT_MARKER_PATTERN.sub("", value)
     return _PUNCTUATION.sub("", value).lower()
-
-
-def _statement_fingerprint(value: str) -> str:
-    normalized = _normalized_comparison_text(value)
-    normalized = normalized.replace("美伊", "伊朗")
-    normalized = normalized.replace("谈判已经开始", "谈判进行").replace("正在谈判", "谈判进行")
-    normalized = normalized.replace("谈判正在进行", "谈判进行")
-    terms = sorted({term for term in _FINGERPRINT_TERMS if term in normalized})
-    return "|".join(terms) if len(terms) >= 2 else ""
 
 
 def _similarity(left: dict[str, object], right: dict[str, object]) -> float:
     left_text = str(left.get("_candidate_text") or left.get("text") or "")
     right_text = str(right.get("_candidate_text") or right.get("text") or "")
-    raw_similarity = SequenceMatcher(
+    return SequenceMatcher(
         None, _normalized_comparison_text(left_text), _normalized_comparison_text(right_text)
     ).ratio()
-    left_fingerprint = _statement_fingerprint(left_text)
-    right_fingerprint = _statement_fingerprint(right_text)
-    if left_fingerprint and left_fingerprint == right_fingerprint:
-        return max(raw_similarity, SequenceMatcher(None, left_fingerprint, right_fingerprint).ratio())
-    return raw_similarity
 
 
 def _public_item(item: dict[str, object]) -> dict[str, object]:

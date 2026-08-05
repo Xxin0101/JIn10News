@@ -476,6 +476,13 @@ def recover_partial_reports_after_successful_fetch(
             "affected_window": _source_window_label(day_start, day_end, tracker_config.timezone),
             "log_path": str(log_path) if log_path else None,
         }
+        trump_update = _fetch_trump_update(
+            day_start,
+            day_end,
+            cache_dir=Path(tracker_config.database_path).parent / "external_updates",
+            timezone_name=tracker_config.timezone,
+        )
+        _log_trump_update(logger, trump_update, context=f"历史缺口回补({day_label})")
         report_result = build_markdown_report(
             store,
             brent_config,
@@ -484,6 +491,7 @@ def recover_partial_reports_after_successful_fetch(
             day=day,
             source_checks=adjusted_checks,
             runtime_summary=runtime_status,
+            trump_update=trump_update,
         )
         markdown = report_result.markdown_path
         html = build_html_report(markdown, output_dir, presentation=report_result.presentation)

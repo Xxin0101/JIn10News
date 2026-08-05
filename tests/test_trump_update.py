@@ -503,5 +503,105 @@ class TrumpUpdateTests(unittest.TestCase):
         self.assertIs(build_report.call_args.kwargs["trump_update"], trump_payload)
         store.close.assert_called_once()
 
+    def test_recovery_fetches_each_window_and_passes_its_exact_trump_payload(self) -> None:
+        """Skipping a recovered window would leave its rebuilt report without the source payload."""
+        from jin10_market_report.brent import BrentConfig
+        from jin10_market_report.config import TrackerConfig
+        from jin10_market_report.tracker import recover_partial_reports_after_successful_fetch
+
+        reaction_counts = {
+            "analyzed": 0,
+            "pending": 0,
+            "price_matched": 0,
+            "price_missing": 0,
+            "price_5m_missing": 0,
+            "price_15m_missing": 0,
+            "price_30m_missing": 0,
+            "price_60m_missing": 0,
+            "effective_oil_news": 0,
+            "summary_without_event": 0,
+            "major_topic_hits": 0,
+            "threshold_hits": 0,
+            "daily": 0,
+            "excluded": 0,
+        }
+        first_payload = {"status": "success", "statement_count": 1, "statements": [{"statement_id": "first"}]}
+        second_payload = {"status": "failed", "statement_count": 0, "failure_reason": "network timeout", "statements": []}
+        store = MagicMock()
+        logger = logging.getLogger("test_trump_recovery")
+
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            output_dir = Path(directory) / "outputs"
+            output_dir.mkdir()
+            for day_token in ("20260804", "20260805"):
+                (output_dir / f"Jin10_Brent_Rolling_Reaction_{day_token}_0800_PARTIAL.md").write_text(
+                    "partial", encoding="utf-8"
+                )
+            database_path = Path(directory) / "tracker.sqlite"
+            tracker_config = TrackerConfig(
+                database_path=str(database_path),
+                output_dir=str(output_dir),
+                timezone="Asia/Shanghai",
+            )
+            stack.enter_context(
+                patch("jin10_market_report.tracker.analyze_reactions_for_range", return_value=reaction_counts)
+            )
+            stack.enter_context(patch("jin10_market_report.tracker.log_window_validation"))
+            stack.enter_context(patch("jin10_market_report.tracker._build_window_audit", return_value={}))
+            stack.enter_context(
+                patch("jin10_market_report.tracker.classify_report_status", return_value=("FORMAL", {}))
+            )
+            fetch_trump = stack.enter_context(
+                patch(
+                    "jin10_market_report.tracker.fetch_trump_statements",
+                    side_effect=[first_payload, second_payload],
+                )
+            )
+            build_report = stack.enter_context(
+                patch(
+                    "jin10_market_report.tracker.build_markdown_report",
+                    return_value=SimpleNamespace(markdown_path=output_dir / "report.md", presentation=SimpleNamespace()),
+                )
+            )
+            stack.enter_context(
+                patch("jin10_market_report.tracker.build_html_report", return_value=output_dir / "report.html")
+            )
+
+            with self.assertLogs(logger, "WARNING") as captured:
+                recovered = recover_partial_reports_after_successful_fetch(
+                    store,
+                    BrentConfig(),
+                    tracker_config,
+                    [],
+                    logger,
+                )
+
+        self.assertEqual([item["day"] for item in recovered], ["2026-08-04", "2026-08-05"])
+        self.assertIn("特朗普专栏抓取失败，不影响金十+Brent主日报", "\n".join(captured.output))
+        self.assertEqual(
+            fetch_trump.call_args_list,
+            [
+                unittest.mock.call(
+                    datetime(2026, 8, 3, 0, 0, tzinfo=UTC),
+                    datetime(2026, 8, 4, 0, 0, tzinfo=UTC),
+                    cache_dir=database_path.parent / "external_updates",
+                    timezone_name="Asia/Shanghai",
+                    retry_failed_cache=False,
+                ),
+                unittest.mock.call(
+                    datetime(2026, 8, 4, 0, 0, tzinfo=UTC),
+                    datetime(2026, 8, 5, 0, 0, tzinfo=UTC),
+                    cache_dir=database_path.parent / "external_updates",
+                    timezone_name="Asia/Shanghai",
+                    retry_failed_cache=False,
+                ),
+            ],
+        )
+        self.assertIs(build_report.call_args_list[0].kwargs["trump_update"], first_payload)
+        self.assertIs(build_report.call_args_list[1].kwargs["trump_update"], second_payload)
+        store.upsert_raw_news.assert_not_called()
+        store.upsert_news.assert_not_called()
+        store.upsert_klines.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main()

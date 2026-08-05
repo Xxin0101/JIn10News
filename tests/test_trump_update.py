@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
+import sys
 import tempfile
 import unittest
+from contextlib import ExitStack
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 from jin10_market_report.trump_update import _group_statement_items, _normalize_item, fetch_trump_statements
@@ -208,6 +212,296 @@ class TrumpUpdateTests(unittest.TestCase):
         self.assertEqual(cached["status"], "success")
         request_page.assert_called_once_with(1)
 
+    def test_retry_flag_is_available_for_report_and_backfill(self) -> None:
+        """Dropping either parser flag would make a failed Trump cache impossible to retry."""
+        from run_jin10_tracker import parse_args
+
+        with patch.object(
+            sys,
+            "argv",
+            ["run_jin10_tracker.py", "report", "--date", "2026-08-05", "--retry-failed-trump"],
+        ):
+            self.assertTrue(parse_args().retry_failed_trump)
+
+        with patch.object(
+            sys,
+            "argv",
+            ["run_jin10_tracker.py", "backfill-day", "--date", "2026-08-05", "--retry-failed-trump"],
+        ):
+            self.assertTrue(parse_args().retry_failed_trump)
+
+    def test_backfill_passes_failed_trump_payload_to_report_without_database_insertion(self) -> None:
+        """Omitting the payload, raising on its failure, or storing it would break report continuity."""
+        from jin10_market_report.brent import BrentConfig
+        from jin10_market_report.config import FetchConfig, FilterConfig, TrackerConfig
+        from jin10_market_report.storage import TrackerStore
+        from jin10_market_report.tracker import run_backfill_day
+
+        reaction_counts = {
+            "analyzed": 0,
+            "pending": 0,
+            "price_matched": 0,
+            "price_missing": 0,
+            "price_5m_missing": 0,
+            "price_15m_missing": 0,
+            "price_30m_missing": 0,
+            "price_60m_missing": 0,
+            "effective_oil_news": 0,
+            "summary_without_event": 0,
+            "major_topic_hits": 0,
+            "threshold_hits": 0,
+            "daily": 0,
+            "excluded": 0,
+        }
+        trump_payload = {
+            "status": "failed",
+            "statement_count": 0,
+            "relevant_source_item_count": 0,
+            "failure_reason": "network timeout",
+            "statements": [],
+        }
+        external_update = {"status": "success", "title": "Iran Update"}
+
+        with tempfile.TemporaryDirectory() as directory:
+            database_path = Path(directory) / "tracker.sqlite"
+            output_dir = Path(directory) / "outputs"
+            store = TrackerStore(database_path)
+            logger = logging.getLogger("test_trump_backfill")
+            tracker_config = TrackerConfig(
+                database_path=str(database_path),
+                output_dir=str(output_dir),
+                timezone="Asia/Shanghai",
+            )
+            try:
+                with ExitStack() as stack:
+                    stack.enter_context(patch("jin10_market_report.tracker.fetch_flashes_between", return_value=[]))
+                    stack.enter_context(
+                        patch(
+                            "jin10_market_report.tracker.fetch_brent_5m_range",
+                            return_value=SimpleNamespace(klines=[], fetched_at_utc=self.end, note=""),
+                        )
+                    )
+                    stack.enter_context(
+                        patch("jin10_market_report.tracker.analyze_reactions_for_range", return_value=reaction_counts)
+                    )
+                    stack.enter_context(patch("jin10_market_report.tracker.log_window_validation"))
+                    stack.enter_context(
+                        patch("jin10_market_report.tracker.fetch_latest_isw_update", return_value=external_update)
+                    )
+                    fetch_trump = stack.enter_context(
+                        patch("jin10_market_report.tracker.fetch_trump_statements", return_value=trump_payload)
+                    )
+                    build_report = stack.enter_context(
+                        patch(
+                            "jin10_market_report.tracker.build_markdown_report",
+                            return_value=SimpleNamespace(
+                                markdown_path=output_dir / "report.md",
+                                presentation=SimpleNamespace(),
+                            ),
+                        )
+                    )
+                    stack.enter_context(
+                        patch(
+                            "jin10_market_report.tracker.build_html_report",
+                            return_value=output_dir / "report.html",
+                        )
+                    )
+                    with self.assertLogs(logger, "WARNING") as captured:
+                        result = run_backfill_day(
+                            store,
+                            FetchConfig(timezone="Asia/Shanghai"),
+                            FilterConfig(),
+                            BrentConfig(),
+                            tracker_config,
+                            logger,
+                            "2026-08-05",
+                            retry_failed_trump=True,
+                        )
+
+                self.assertIn("特朗普专栏抓取失败，不影响金十+Brent主日报", "\n".join(captured.output))
+                fetch_trump.assert_called_once_with(
+                    self.start,
+                    self.end,
+                    cache_dir=database_path.parent / "external_updates",
+                    timezone_name="Asia/Shanghai",
+                    retry_failed_cache=True,
+                )
+                self.assertIs(build_report.call_args.kwargs["trump_update"], trump_payload)
+                self.assertIs(result["trump_update"], trump_payload)
+                self.assertEqual(result["trump_update_status"], "失败")
+                self.assertEqual(store.counts(), {"news": 0, "brent_klines": 0, "pending_news": 0, "daily_news": 0})
+            finally:
+                store.close()
+
+    def test_backfill_continues_when_trump_fetcher_raises(self) -> None:
+        """A cache or transport exception must not prevent the core report from being generated."""
+        from jin10_market_report.brent import BrentConfig
+        from jin10_market_report.config import FetchConfig, FilterConfig, TrackerConfig
+        from jin10_market_report.tracker import run_backfill_day
+
+        reaction_counts = {
+            "analyzed": 0,
+            "pending": 0,
+            "price_matched": 0,
+            "price_missing": 0,
+            "price_5m_missing": 0,
+            "price_15m_missing": 0,
+            "price_30m_missing": 0,
+            "price_60m_missing": 0,
+            "effective_oil_news": 0,
+            "summary_without_event": 0,
+            "major_topic_hits": 0,
+            "threshold_hits": 0,
+            "daily": 0,
+            "excluded": 0,
+        }
+        store = MagicMock()
+        store.report_focus_rows.return_value = []
+        store.counts.return_value = {}
+        logger = logging.getLogger("test_trump_exception")
+
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            output_dir = Path(directory) / "outputs"
+            tracker_config = TrackerConfig(
+                database_path=str(Path(directory) / "tracker.sqlite"),
+                output_dir=str(output_dir),
+                timezone="Asia/Shanghai",
+            )
+            stack.enter_context(patch("jin10_market_report.tracker.fetch_flashes_between", return_value=[]))
+            stack.enter_context(
+                patch(
+                    "jin10_market_report.tracker.fetch_brent_5m_range",
+                    return_value=SimpleNamespace(klines=[], fetched_at_utc=self.end, note=""),
+                )
+            )
+            stack.enter_context(
+                patch("jin10_market_report.tracker.analyze_reactions_for_range", return_value=reaction_counts)
+            )
+            stack.enter_context(patch("jin10_market_report.tracker.log_window_validation"))
+            stack.enter_context(
+                patch("jin10_market_report.tracker.fetch_latest_isw_update", return_value={"status": "success"})
+            )
+            stack.enter_context(
+                patch("jin10_market_report.tracker.fetch_trump_statements", side_effect=OSError("cache unavailable"))
+            )
+            build_report = stack.enter_context(
+                patch(
+                    "jin10_market_report.tracker.build_markdown_report",
+                    return_value=SimpleNamespace(markdown_path=output_dir / "report.md", presentation=SimpleNamespace()),
+                )
+            )
+            stack.enter_context(
+                patch("jin10_market_report.tracker.build_html_report", return_value=output_dir / "report.html")
+            )
+            with self.assertLogs(logger, "WARNING") as captured:
+                result = run_backfill_day(
+                    store,
+                    FetchConfig(timezone="Asia/Shanghai"),
+                    FilterConfig(),
+                    BrentConfig(),
+                    tracker_config,
+                    logger,
+                    "2026-08-05",
+                )
+
+        self.assertIn("特朗普专栏抓取失败，不影响金十+Brent主日报", "\n".join(captured.output))
+        self.assertEqual(build_report.call_args.kwargs["trump_update"]["status"], "failed")
+        self.assertIn("cache unavailable", build_report.call_args.kwargs["trump_update"]["failure_reason"])
+        self.assertEqual(result["trump_update_status"], "失败")
+
+    def test_report_command_passes_trump_payload_and_retry_flag_to_report_builder(self) -> None:
+        """Dropping the report-command payload or retry flag would make CLI regeneration inconsistent."""
+        from jin10_market_report.brent import BrentConfig
+        from jin10_market_report.config import FetchConfig, FilterConfig, TrackerConfig
+        from run_jin10_tracker import main
+
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            database_path = Path(directory) / "tracker.sqlite"
+            output_dir = Path(directory) / "outputs"
+            tracker_config = TrackerConfig(
+                database_path=str(database_path),
+                output_dir=str(output_dir),
+                timezone="Asia/Shanghai",
+            )
+            args = SimpleNamespace(
+                command="report",
+                date="2026-08-05",
+                log_dir=str(Path(directory) / "logs"),
+                retry_failed_isw=False,
+                retry_failed_trump=True,
+            )
+            store = MagicMock()
+            store.report_focus_rows.return_value = []
+            logger = logging.getLogger("test_trump_report_command")
+            trump_payload = {"status": "success", "statement_count": 1, "relevant_source_item_count": 1}
+
+            stack.enter_context(patch("run_jin10_tracker.parse_args", return_value=args))
+            stack.enter_context(
+                patch("run_jin10_tracker.setup_logger", return_value=(logger, Path(directory) / "tracker.log"))
+            )
+            stack.enter_context(
+                patch(
+                    "run_jin10_tracker.build_configs",
+                    return_value=(FetchConfig(), FilterConfig(), BrentConfig(), tracker_config),
+                )
+            )
+            stack.enter_context(patch("run_jin10_tracker.TrackerStore", return_value=store))
+            stack.enter_context(
+                patch(
+                    "jin10_market_report.reaction.analyze_reactions_for_range",
+                    return_value={
+                        "analyzed": 0,
+                        "pending": 0,
+                        "price_matched": 0,
+                        "price_missing": 0,
+                        "price_5m_missing": 0,
+                        "price_15m_missing": 0,
+                        "price_30m_missing": 0,
+                        "price_60m_missing": 0,
+                        "effective_oil_news": 0,
+                        "summary_without_event": 0,
+                        "major_topic_hits": 0,
+                        "threshold_hits": 0,
+                        "daily": 0,
+                        "excluded": 0,
+                    },
+                )
+            )
+            stack.enter_context(patch("jin10_market_report.tracker.log_window_validation"))
+            stack.enter_context(patch("jin10_market_report.tracking_report._build_price_movement_review", return_value={}))
+            stack.enter_context(
+                patch("jin10_market_report.external_update.fetch_latest_isw_update", return_value={"status": "success"})
+            )
+            fetch_trump = stack.enter_context(
+                patch("jin10_market_report.trump_update.fetch_trump_statements", return_value=trump_payload)
+            )
+            build_report = stack.enter_context(
+                patch(
+                    "jin10_market_report.tracking_report.build_markdown_report",
+                    return_value=SimpleNamespace(markdown_path=output_dir / "report.md", presentation=SimpleNamespace()),
+                )
+            )
+            stack.enter_context(
+                patch("jin10_market_report.tracking_report.build_html_report", return_value=output_dir / "report.html")
+            )
+            stack.enter_context(
+                patch("jin10_market_report.tracking_report.audit_markdown_path_for", return_value=output_dir / "audit.md")
+            )
+            stack.enter_context(
+                patch("jin10_market_report.tracking_report.audit_html_path_for", return_value=output_dir / "audit.html")
+            )
+
+            self.assertEqual(main(), 0)
+
+        fetch_trump.assert_called_once_with(
+            self.start,
+            self.end,
+            cache_dir=database_path.parent / "external_updates",
+            timezone_name="Asia/Shanghai",
+            retry_failed_cache=True,
+        )
+        self.assertIs(build_report.call_args.kwargs["trump_update"], trump_payload)
+        store.close.assert_called_once()
 
 if __name__ == "__main__":
     unittest.main()

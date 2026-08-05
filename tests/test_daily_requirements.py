@@ -36,6 +36,7 @@ from jin10_market_report.tracking_report import (
     brent_day_summary,
     classify_report_status,
 )
+from jin10_market_report import tracking_report
 
 
 UTC = ZoneInfo("UTC")
@@ -93,6 +94,62 @@ class _PriceStore:
 
 
 class DailyRequirementTests(unittest.TestCase):
+    def test_external_source_integrity_audit_counts(self) -> None:
+        """Changing source counts or omitting grouped source IDs breaks audit traceability."""
+        external_update = {
+            "status": "success",
+            "source_key_takeaways_count": 8,
+            "translated_key_takeaways_count": 8,
+            "key_takeaways_zh": [f"中文要点{index}" for index in range(1, 9)],
+        }
+        trump_update = {
+            "status": "success",
+            "raw_topic_item_count": 4,
+            "in_window_item_count": 4,
+            "relevant_source_item_count": 3,
+            "statement_count": 2,
+            "statements": [
+                {
+                    "statement_id": "100",
+                    "published_at_bj": "2026-08-04 11:34:54",
+                    "text": "特朗普称美伊谈判仍在进行。",
+                    "topics": ["伊朗", "核谈判"],
+                    "source_items": [
+                        {"id": 100, "published_at_bj": "2026-08-04 11:34:54", "source_url": "https://xnews.jin10.com/details/100"},
+                        {"id": 101, "published_at_bj": "2026-08-04 11:43:35", "source_url": "https://xnews.jin10.com/details/101"},
+                    ],
+                },
+                {
+                    "statement_id": "102",
+                    "published_at_bj": "2026-08-04 19:43:35",
+                    "text": "特朗普要求石油企业降低油价。",
+                    "topics": ["油价"],
+                    "source_items": [
+                        {"id": 102, "published_at_bj": "2026-08-04 19:43:35", "source_url": "https://xnews.jin10.com/details/102"},
+                    ],
+                },
+            ],
+        }
+
+        audit = "\n".join(
+            tracking_report._external_source_integrity_lines(external_update, trump_update)
+        )
+
+        for expected in (
+            "ISW Key Takeaways原文数量：8",
+            "ISW Key Takeaways翻译数量：8",
+            "ISW Key Takeaways正文渲染数量：8",
+            "特朗普专栏窗口内条目数量：4",
+            "特朗普相关来源条目数量：3",
+            "特朗普独立表态数量：2",
+            "表态ID：100",
+            "表态ID：102",
+            "来源ID：100",
+            "来源ID：101",
+            "来源ID：102",
+        ):
+            self.assertIn(expected, audit)
+
     def test_news_direction_uses_new_fact_instead_of_price_or_risk_keyword(self) -> None:
         denial = market_bias_for_event(
             "伊拉克组织否认袭击沙特石油设施",

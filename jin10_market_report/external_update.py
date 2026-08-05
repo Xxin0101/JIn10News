@@ -348,11 +348,32 @@ def fetch_latest_isw_update(
     """Fetch once per report cutoff unless a failed cache is explicitly retried."""
     cache_path = _cache_path(cache_dir, as_of_utc, timezone_name)
     if cache_path.exists():
-        cached = json.loads(cache_path.read_text(encoding="utf-8"))
-        if cached.get("status") == "success" or not retry_failed_cache:
-            cached["cache_hit"] = True
-            cached["cache_path"] = str(cache_path)
-            return cached
+        try:
+            cached = json.loads(cache_path.read_text(encoding="utf-8"))
+            if not isinstance(cached, dict):
+                raise ValueError("缓存内容不是JSON对象")
+        except Exception as exc:
+            if not retry_failed_cache:
+                return {
+                    "status": "failed",
+                    "listing_url": ISW_LISTING_URL,
+                    "as_of_utc": iso_utc(ensure_utc(as_of_utc)),
+                    "fetched_at_utc": iso_utc(utc_now()),
+                    "cache_hit": False,
+                    "cache_path": str(cache_path),
+                    "attempt_errors": [f"ISW缓存读取失败：{exc}"],
+                    "failure_reason": f"ISW缓存读取失败：{exc}",
+                    "summary_zh": [],
+                    "source_key_takeaways": [],
+                    "key_takeaways_zh": [],
+                    "source_key_takeaways_count": 0,
+                    "translated_key_takeaways_count": 0,
+                }
+        else:
+            if cached.get("status") == "success" or not retry_failed_cache:
+                cached["cache_hit"] = True
+                cached["cache_path"] = str(cache_path)
+                return cached
 
     result: dict[str, object] = {
         "status": "failed",
@@ -365,6 +386,8 @@ def fetch_latest_isw_update(
         "summary_zh": [],
         "source_key_takeaways": [],
         "key_takeaways_zh": [],
+        "source_key_takeaways_count": 0,
+        "translated_key_takeaways_count": 0,
     }
     attempts: list[str] = []
     source: dict[str, object] | None = None

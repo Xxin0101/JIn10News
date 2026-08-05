@@ -34,7 +34,7 @@ ISW、特朗普专题任一抓取失败、缓存异常或 ISW 计数校验失败
 
 ## 报告顺序与 20260805 交付检查
 
-生成顺序为：更新/读取金十与 Brent → 计算反应与价格异动复盘 → 读取外部缓存或抓取 ISW、特朗普补充 → 写 Markdown 与 Audit → 写 HTML 与 SVG。正式 `FORMAL` 交付应产生：
+生成顺序为：更新/读取金十与 Brent → 计算反应与价格异动复盘 → 读取外部缓存或抓取 ISW、特朗普补充 → 在 `build_markdown_report` 内渲染 SVG → 写 Audit Markdown/HTML → 写主报告 Markdown → CLI 写主报告 HTML。正式 `FORMAL` 交付应产生：
 
 - `outputs/tracker/Jin10_Brent_Rolling_Reaction_20260805_0800.md`
 - `outputs/tracker/Jin10_Brent_Rolling_Reaction_20260805_0800.html`

@@ -1753,6 +1753,56 @@ class DailyRequirementTests(unittest.TestCase):
             fetch_site.assert_called_once_with(cutoff)
             self.assertEqual(json.loads(cache_path.read_text(encoding="utf-8"))["status"], "success")
 
+    def test_corrupt_isw_cache_returns_isolated_failure_without_network_fetch(self) -> None:
+        """A malformed cache must become a visible failed payload, not block the report path."""
+        cutoff = datetime(2026, 8, 5, 0, 0, tzinfo=UTC)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache_dir = Path(temp_dir)
+            cache_path = cache_dir / "isw_iran_update_20260805_0800.json"
+            cache_path.write_text("{not valid json", encoding="utf-8")
+            with (
+                patch("jin10_market_report.external_update._fetch_from_site") as fetch_site,
+                patch("jin10_market_report.external_update._fetch_from_official_bluesky") as fetch_bluesky,
+            ):
+                result = fetch_latest_isw_update(cutoff, cache_dir=cache_dir)
+
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("ISW缓存读取失败", result["failure_reason"])
+        self.assertEqual(result["source_key_takeaways"], [])
+        self.assertEqual(result["key_takeaways_zh"], [])
+        self.assertEqual(result["source_key_takeaways_count"], 0)
+        self.assertEqual(result["translated_key_takeaways_count"], 0)
+        fetch_site.assert_not_called()
+        fetch_bluesky.assert_not_called()
+
+    def test_retry_can_bypass_corrupt_isw_cache(self) -> None:
+        """An explicit retry may replace an unreadable cache through the normal fetch path."""
+        cutoff = datetime(2026, 8, 5, 0, 0, tzinfo=UTC)
+        source = {
+            "fetch_method": "官网直连",
+            "title": "Iran Update, August 4, 2026",
+            "url": "https://understandingwar.org/research/middle-east/iran-update-august-4-2026/",
+            "published_at_utc": "2026-08-04T22:30:00Z",
+            "source_key_takeaways": ["one", "two"],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache_dir = Path(temp_dir)
+            cache_path = cache_dir / "isw_iran_update_20260805_0800.json"
+            cache_path.write_text("{not valid json", encoding="utf-8")
+            with (
+                patch("jin10_market_report.external_update._fetch_from_site", return_value=source) as fetch_site,
+                patch("jin10_market_report.external_update._translate_bullets", return_value=["一", "二"]),
+            ):
+                result = fetch_latest_isw_update(
+                    cutoff,
+                    cache_dir=cache_dir,
+                    retry_failed_cache=True,
+                )
+
+        self.assertEqual(result["status"], "success")
+        self.assertFalse(result["cache_hit"])
+        fetch_site.assert_called_once_with(cutoff)
+
 
 if __name__ == "__main__":
     unittest.main()

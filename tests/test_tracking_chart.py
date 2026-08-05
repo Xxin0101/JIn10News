@@ -35,6 +35,7 @@ from jin10_market_report.tracking_report import (
     _raw_inventory_lines,
     _segment_coverage_lines,
     _tracking_outlook_lines,
+    _top_summary_items,
     _top_level_warning,
     _unexplained_price_movement_lines,
     _audit_title,
@@ -86,6 +87,9 @@ class TrackingChartTests(unittest.TestCase):
             "published_at_et": "2026-07-23 18:00",
             "published_at_bj": "2026-07-24 06:00",
             "url": "https://understandingwar.org/research/middle-east/iran-update-july-23-2026/",
+            "source_key_takeaways": ["source one", "source two", "source three"],
+            "source_key_takeaways_count": 3,
+            "translated_key_takeaways_count": 3,
             "key_takeaways_zh": [
                 "伊朗部队威胁霍尔木兹附近商船。",
                 "地区军事力量正在调整防空部署。",
@@ -161,9 +165,10 @@ class TrackingChartTests(unittest.TestCase):
             "published_at_et": "2026-08-04 18:30",
             "published_at_bj": "2026-08-05 06:30",
             "url": "https://understandingwar.org/research/middle-east/iran-update-august-4-2026/",
+            "source_key_takeaways": [f"Source Key Takeaway {index}" for index in range(1, 9)],
             "source_key_takeaways_count": 8,
             "translated_key_takeaways_count": 8,
-            "key_takeaways_zh": [f"中文Key Takeaway {index}" for index in range(1, 9)],
+            "key_takeaways_zh": [f"中文Key Takeaway {index}：研判{index}" for index in range(1, 9)],
         }
         trump_update = {
             "status": "success",
@@ -177,7 +182,7 @@ class TrackingChartTests(unittest.TestCase):
                     "published_at_utc": "2026-08-04T11:43:35Z",
                     "published_at_bj": "2026-08-04 19:43:35",
                     "text": "特朗普要求石油企业降低油价。",
-                    "topics": ["油价", "石油企业"],
+                    "topics": ["原油与能源"],
                     "source_items": [
                         {
                             "id": 102,
@@ -225,10 +230,18 @@ class TrackingChartTests(unittest.TestCase):
             panel_groups=(),
             unmatched_major_items=(
                 {
-                    "id": "major-1",
-                    "title": "霍尔木兹航运风险上升",
-                    "summary": "油轮航线面临新的通行风险。",
-                    "time": "2026-08-04 12:00",
+                    "id": "lower-priority",
+                    "title": "伊朗称霍尔木兹航运安全",
+                    "summary": "这是较低优先级的未匹配事项。",
+                    "time": "2026-08-04 09:00",
+                    "url": "https://flash.jin10.com/detail/lower-priority",
+                },
+                {
+                    "id": "higher-priority",
+                    "title": "利比亚油田已停产",
+                    "summary": "油田停产构成实际供应中断。",
+                    "time": "2026-08-04 18:20",
+                    "url": "https://flash.jin10.com/detail/higher-priority",
                 },
             ),
             iran_update_items=(),
@@ -265,11 +278,18 @@ class TrackingChartTests(unittest.TestCase):
         summary_section = markdown.split("## 今日重点（Executive Summary）", 1)[1].split("统计窗口：", 1)[0]
         self.assertGreaterEqual(summary_section.count("- "), 2)
         self.assertLessEqual(summary_section.count("- "), 5)
+        for evidence in (
+            "本窗口没有需要单列的“价格异动但新闻解释不足”事件。",
+            "首页重大事项：利比亚油田已停产",
+            "特朗普表态：特朗普要求石油企业降低油价。",
+            "ISW研判：研判1",
+        ):
+            self.assertIn(evidence, summary_section)
         self.assertLess(markdown.index("## 特朗普相关言论"), markdown.index("## ISW Iran Update"))
         self.assertLess(markdown.index("2026-08-04 11:34:54"), markdown.index("2026-08-04 19:43:35"))
         for expected in (
             "伊朗、核谈判",
-            "油价、石油企业",
+            "原油与能源",
             "https://xnews.jin10.com/details/100",
             "https://xnews.jin10.com/details/101",
             "https://xnews.jin10.com/details/102",
@@ -278,6 +298,150 @@ class TrackingChartTests(unittest.TestCase):
         self.assertEqual(len(result.presentation.top_summary_items), summary_section.count("- "))
         self.assertEqual(len(result.presentation.trump_items), 2)
         self.assertEqual(sum(len(item["source_items"]) for item in result.presentation.trump_items), 3)
+        body = markdown.split("统计窗口：", 1)[1]
+        for evidence in (
+            "84.20",
+            "+1.25%",
+            "85.10",
+            "82.90",
+            "本窗口没有需要单列的“价格异动但新闻解释不足”事件。",
+            "利比亚油田已停产",
+            "特朗普要求石油企业降低油价。",
+            "研判1",
+        ):
+            self.assertIn(evidence, body)
+        self.assertIn("## 首页重大事项（未匹配显著异动）", body)
+        self.assertIn("2026-08-04 18:20", body)
+        self.assertIn("https://flash.jin10.com/detail/higher-priority", body)
+        self.assertIn("不构成正式价格归因", body)
+
+    def test_top_summary_uses_bound_homepage_and_trump_priorities(self) -> None:
+        """Input order must not override the bound homepage/topic priority rules."""
+        homepage = FormalReportPresentation(
+            panel_groups=(),
+            unmatched_major_items=(
+                {
+                    "id": "lower-priority",
+                    "time": "2026-08-04 09:00",
+                    "title": "伊朗称霍尔木兹航运安全",
+                    "summary": "较早但优先级较低。",
+                    "url": "https://flash.jin10.com/detail/lower-priority",
+                },
+                {
+                    "id": "higher-priority",
+                    "time": "2026-08-04 18:20",
+                    "title": "利比亚油田已停产",
+                    "summary": "较晚但属于实际供应中断。",
+                    "url": "https://flash.jin10.com/detail/higher-priority",
+                },
+            ),
+            iran_update_items=(),
+        )
+        trump_update = {
+            "status": "success",
+            "statements": [
+                {
+                    "statement_id": "iran-latest",
+                    "published_at_utc": "2026-08-04T20:00:00Z",
+                    "text": "较新的伊朗一般表态。",
+                    "topics": ["伊朗"],
+                },
+                {
+                    "statement_id": "hormuz-older",
+                    "published_at_utc": "2026-08-04T10:00:00Z",
+                    "text": "较早但最高优先级的霍尔木兹表态。",
+                    "topics": ["霍尔木兹"],
+                },
+                {
+                    "statement_id": "hormuz-latest-b",
+                    "published_at_utc": "2026-08-04T21:00:00Z",
+                    "text": "同主题最新但ID较大的霍尔木兹表态。",
+                    "topics": ["霍尔木兹"],
+                },
+                {
+                    "statement_id": "hormuz-latest-a",
+                    "published_at_utc": "2026-08-04T21:00:00Z",
+                    "text": "同主题最新且ID最小的霍尔木兹表态。",
+                    "topics": ["霍尔木兹"],
+                },
+            ],
+        }
+
+        items = _top_summary_items(
+            {"latest": "80.00", "pct": "+1.00%", "high": "81.00", "low": "79.00"},
+            {"groups": [], "unexplained": []},
+            homepage,
+            trump_update,
+            {"status": "failed", "failure_reason": "test"},
+            "FORMAL",
+            {"data_integrity": "完整"},
+        )
+
+        self.assertIn("首页重大事项：利比亚油田已停产", items)
+        self.assertNotIn("首页重大事项：伊朗称霍尔木兹航运安全", items)
+        self.assertIn("特朗普表态：同主题最新且ID最小的霍尔木兹表态。", items)
+        self.assertNotIn("特朗普表态：较新的伊朗一般表态。", items)
+
+    def test_top_summary_normalizes_evidence_dedup_and_excludes_failed_sources(self) -> None:
+        """Prefix and punctuation differences must not duplicate one evidence item."""
+        homepage = FormalReportPresentation(
+            panel_groups=(),
+            unmatched_major_items=(
+                {
+                    "id": "shared",
+                    "time": "2026-08-04 10:00",
+                    "title": "共同 证据！",
+                    "summary": "共同证据",
+                    "url": "https://flash.jin10.com/detail/shared",
+                },
+            ),
+            iran_update_items=(),
+        )
+        shared_trump = {
+            "status": "success",
+            "statements": [
+                {
+                    "statement_id": "shared",
+                    "published_at_utc": "2026-08-04T10:00:00Z",
+                    "text": "共同证据",
+                    "topics": ["霍尔木兹"],
+                }
+            ],
+        }
+        shared_isw = {
+            "status": "success",
+            "source_key_takeaways": ["shared evidence"],
+            "key_takeaways_zh": ["共同证据"],
+            "source_key_takeaways_count": 1,
+            "translated_key_takeaways_count": 1,
+        }
+
+        items = _top_summary_items(
+            {"latest": "80.00", "pct": "+1.00%", "high": "81.00", "low": "79.00"},
+            {"groups": [], "unexplained": []},
+            homepage,
+            shared_trump,
+            shared_isw,
+            "FORMAL",
+            {"data_integrity": "完整"},
+        )
+        normalized_shared = [item for item in items if re.sub(r"[\W_]+", "", item).endswith("共同证据")]
+        self.assertEqual(len(normalized_shared), 1)
+
+        failed_items = _top_summary_items(
+            {"latest": "80.00", "pct": "+1.00%", "high": "81.00", "low": "79.00"},
+            {"groups": [], "unexplained": []},
+            FormalReportPresentation(panel_groups=(), unmatched_major_items=(), iran_update_items=()),
+            {**shared_trump, "status": "failed", "failure_reason": "Trump failed"},
+            {**shared_isw, "status": "failed", "failure_reason": "ISW failed"},
+            "PARTIAL",
+            {"data_integrity": "部分缓存"},
+        )
+        failed_text = "\n".join(failed_items)
+        self.assertNotIn("特朗普表态：", failed_text)
+        self.assertNotIn("ISW研判：", failed_text)
+        self.assertNotIn("Trump failed", failed_text)
+        self.assertNotIn("ISW failed", failed_text)
 
     def test_pending_news_status_is_visible_in_markdown_and_blue_panel(self) -> None:
         published = datetime(2026, 7, 23, 23, 49, tzinfo=UTC)
@@ -344,6 +508,9 @@ class TrackingChartTests(unittest.TestCase):
             "published_at_et": "2026-07-23 18:00",
             "published_at_bj": "2026-07-24 06:00",
             "url": "https://understandingwar.org/research/middle-east/iran-update-july-23-2026/",
+            "source_key_takeaways": ["source one"],
+            "source_key_takeaways_count": 1,
+            "translated_key_takeaways_count": 1,
             "key_takeaways_zh": ["霍尔木兹附近商船风险上升。"],
         }
 
@@ -1327,6 +1494,9 @@ class TrackingChartTests(unittest.TestCase):
                 "status": "success",
                 "title": "Iran Update, July 21, 2026",
                 "url": "https://understandingwar.org/research/middle-east/iran-update-july-21-2026/",
+                "source_key_takeaways": ["one", "two", "three"],
+                "source_key_takeaways_count": 3,
+                "translated_key_takeaways_count": 3,
                 "key_takeaways_zh": [
                     "伊朗部队威胁霍尔木兹附近商船。",
                     "伊朗官员讨论制裁缓解与核谈判。",
@@ -1336,12 +1506,12 @@ class TrackingChartTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(len(items), 4)
+        self.assertEqual(len(items), 3)
         self.assertTrue(all(item["url"].startswith("https://understandingwar.org/") for item in items))
         self.assertIn("霍尔木兹", items[0]["text"])
-        self.assertIn("保险限制", items[-1]["text"])
+        self.assertNotIn("保险限制", "\n".join(item["text"] for item in items))
 
-    def test_isw_dashboard_limits_legacy_summary_cache_to_key_takeaways(self) -> None:
+    def test_isw_dashboard_rejects_legacy_summary_cache(self) -> None:
         items = _isw_dashboard_items(
             {
                 "status": "success",
@@ -1356,7 +1526,9 @@ class TrackingChartTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual([item["text"] for item in items], ["要点一。", "要点二。", "要点三。", "要点四。"])
+        self.assertEqual(len(items), 1)
+        self.assertIn("完整性校验失败", items[0]["text"])
+        self.assertNotIn("要点一。", items[0]["text"])
 
     def test_isw_dashboard_keeps_complete_sentences_when_concising(self) -> None:
         long_sentence = "伊朗方面称将继续推进区域军事部署" + "并评估事态升级风险" * 25 + "。"
@@ -1364,6 +1536,9 @@ class TrackingChartTests(unittest.TestCase):
             {
                 "status": "success",
                 "url": "https://understandingwar.org/research/middle-east/iran-update-july-21-2026/",
+                "source_key_takeaways": ["one", "two", "three"],
+                "source_key_takeaways_count": 3,
+                "translated_key_takeaways_count": 3,
                 "key_takeaways_zh": [long_sentence, "霍尔木兹航运风险仍需跟踪。", "制裁变化可能影响出口预期。"],
             }
         )

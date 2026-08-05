@@ -1568,7 +1568,34 @@ def _homepage_destinations(
     return {raw_id: tuple(routes) for raw_id, routes in destinations.items()}
 
 
+def _homepage_priority_candidate(candidate: Mapping[str, object]) -> Mapping[str, object]:
+    if candidate.get("row") is not None:
+        return candidate
+    published: datetime | None = None
+    time_text = str(candidate.get("time") or "")
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            published = datetime.strptime(time_text, fmt).replace(
+                tzinfo=ZoneInfo("Asia/Shanghai")
+            ).astimezone(ZoneInfo("UTC"))
+            break
+        except ValueError:
+            continue
+    return {
+        **dict(candidate),
+        "raw_id": str(candidate.get("id") or ""),
+        "published_dt": published or datetime.min.replace(tzinfo=ZoneInfo("UTC")),
+        "row": {
+            "raw_id": str(candidate.get("id") or ""),
+            "title": str(candidate.get("title") or ""),
+            "body": str(candidate.get("summary") or ""),
+            "url": str(candidate.get("url") or ""),
+        },
+    }
+
+
 def _homepage_all_day_priority(candidate: Mapping[str, object], _role: str) -> tuple[int, int, datetime, str]:
+    candidate = _homepage_priority_candidate(candidate)
     identity = _homepage_event_identity(candidate)
     state = _homepage_event_state(candidate)
     event_key = str(identity["event_key"])
@@ -3571,6 +3598,7 @@ def _unexplained_price_movement_lines(
         lines.append("本窗口没有需要单列的“价格异动但新闻解释不足”事件。")
         lines.append("")
         return lines
+    lines.extend([f"本窗口有{len(unexplained)}段显著价格异动尚无正式新闻解释。", ""])
     displayed_background_ids: set[str] = set()
     for group in unexplained:
         chart_event_id = str(group.get("chart_event_id") or "")
@@ -4641,42 +4669,54 @@ def _extra_tracking_items(audit: dict[str, object], selected_raw_ids: Iterable[s
     return lines
 
 
+def _validated_isw_key_takeaways(
+    external_update: Mapping[str, object],
+) -> tuple[list[str], str]:
+    if external_update.get("status") != "success":
+        reason = str(external_update.get("failure_reason") or "未知错误")
+        return [], f"{ISW_FAILURE_COPY} 失败原因：{reason}"
+    source_items = list(external_update.get("source_key_takeaways") or [])
+    translated_items = list(external_update.get("key_takeaways_zh") or [])
+    try:
+        source_count = int(external_update.get("source_key_takeaways_count"))
+        translated_count = int(external_update.get("translated_key_takeaways_count"))
+    except (TypeError, ValueError):
+        source_count = translated_count = -1
+    actual_source_count = len(source_items)
+    actual_translated_count = len(translated_items)
+    if not (
+        actual_source_count > 0
+        and actual_source_count
+        == actual_translated_count
+        == source_count
+        == translated_count
+    ):
+        return [], "ISW Key Takeaways完整性校验失败：原文、翻译及声明数量必须为正数且完全一致。"
+    return [str(item) for item in translated_items], ""
+
+
 def _tracking_outlook_lines(external_update: dict[str, object]) -> list[str]:
-    success = str(external_update.get("status") or "failed") == "success"
     source_url = str(external_update.get("url") or external_update.get("listing_url") or ISW_LISTING_URL)
-    key_takeaways = list(
-        external_update.get("key_takeaways_zh")
-        or external_update.get("summary_zh")
-        or []
-    )
-    lines = ["## ISW Iran Update", ""]
-    if success:
-        lines.extend(
-            [
-                f"- 更新时间：纽约时间 {external_update.get('published_at_et') or 'N/A'} / "
-                f"北京时间 {external_update.get('published_at_bj') or 'N/A'}",
-                f"- 标题：{external_update.get('title') or 'N/A'}",
-                f"- 原文链接：{source_url}",
-                "",
-                "**Key Takeaways：**",
-                "",
-            ]
-        )
+    key_takeaways, failure_reason = _validated_isw_key_takeaways(external_update)
+    lines = [
+        "## ISW Iran Update",
+        "",
+        f"- 更新时间：纽约时间 {external_update.get('published_at_et') or 'N/A'} / "
+        f"北京时间 {external_update.get('published_at_bj') or 'N/A'}",
+        f"- 标题：{external_update.get('title') or 'N/A'}",
+        f"- 原文链接：{source_url}",
+        "",
+    ]
+    if key_takeaways:
+        lines.extend(["**Key Takeaways：**", ""])
         for index, item in enumerate(key_takeaways, 1):
             lines.append(f"{index}. {item}")
-        if not key_takeaways:
-            lines.append("1. 本次未提炼出可用Key Takeaways，保留原文供人工核查。")
     else:
-        lines.extend(
-            [
-                ISW_FAILURE_COPY,
-                f"- 原文链接：{source_url}",
-            ]
-        )
+        lines.append(f"- {failure_reason}")
 
-    isw_watch = _first_isw_takeaway_text(key_takeaways) if success and key_takeaways else ISW_FAILURE_COPY
+    isw_watch = _first_isw_takeaway_text(key_takeaways) if key_takeaways else failure_reason
     lines.extend(["", "## 今日关注什么", ""])
-    if not success:
+    if not key_takeaways:
         lines.append("- 指定网站本次抓取失败，以下内容根据已获取的相关新闻和ISW信息整理。")
     lines.extend(
         [
@@ -4760,6 +4800,49 @@ def _trump_dashboard_items(trump_update: dict[str, object]) -> list[dict[str, ob
     ]
 
 
+def _highest_priority_unmatched_homepage_item(
+    homepage_presentation: FormalReportPresentation,
+) -> dict[str, object] | None:
+    items = list(homepage_presentation.unmatched_major_items)
+    return min(
+        items,
+        key=lambda item: _homepage_all_day_priority(item, "unmatched"),
+    ) if items else None
+
+
+_TRUMP_SUMMARY_TOPIC_PRIORITY = (
+    "霍尔木兹",
+    "战争与军事行动",
+    "原油与能源",
+    "制裁",
+    "伊朗",
+)
+
+
+def _trump_summary_priority(statement: Mapping[str, object]) -> tuple[int, float, str]:
+    topics = {str(topic) for topic in statement.get("topics") or []}
+    topic_rank = min(
+        (index for index, topic in enumerate(_TRUMP_SUMMARY_TOPIC_PRIORITY) if topic in topics),
+        default=len(_TRUMP_SUMMARY_TOPIC_PRIORITY),
+    )
+    published = parse_iso_utc(str(statement.get("published_at_utc") or ""))
+    latest_first = -published.timestamp() if published else float("inf")
+    return topic_rank, latest_first, str(statement.get("statement_id") or "")
+
+
+def _highest_priority_trump_statement(
+    trump_update: Mapping[str, object],
+) -> Mapping[str, object] | None:
+    if trump_update.get("status") != "success":
+        return None
+    statements = list(trump_update.get("statements") or [])
+    return min(statements, key=_trump_summary_priority) if statements else None
+
+
+def _normalized_summary_evidence(text: object) -> str:
+    return re.sub(r"[\W_]+", "", str(text or "").casefold(), flags=re.UNICODE)
+
+
 def _top_summary_items(
     brent_summary: Mapping[str, str],
     movement_review: Mapping[str, object],
@@ -4769,17 +4852,21 @@ def _top_summary_items(
     report_status: str,
     audit: Mapping[str, object],
 ) -> list[str]:
-    items: list[str] = []
+    candidates: list[tuple[str, str]] = []
+
+    def add(rendered: str, evidence: str | None = None) -> None:
+        candidates.append((rendered, evidence if evidence is not None else rendered))
+
     latest = str(brent_summary.get("latest") or "价格数据暂不可用")
     pct = str(brent_summary.get("pct") or "涨跌幅暂不可用")
     high = str(brent_summary.get("high") or "")
     low = str(brent_summary.get("low") or "")
     unavailable = {"", "N/A", "None", "价格数据暂不可用"}
     if high not in unavailable and low not in unavailable:
-        items.append(f"Brent：最新价{latest}，24小时涨跌幅{pct}，区间最高{high}、最低{low}。")
+        add(f"Brent：最新价{latest}，24小时涨跌幅{pct}，区间最高{high}、最低{low}。")
     else:
         data_status = str(audit.get("data_integrity") or report_status or "未知")
-        items.append(f"Brent：最新价{latest}，24小时涨跌幅{pct}；高低点数据暂不可用（数据状态：{data_status}）。")
+        add(f"Brent：最新价{latest}，24小时涨跌幅{pct}；高低点数据暂不可用（数据状态：{data_status}）。")
 
     attributed = [
         group
@@ -4797,57 +4884,73 @@ def _top_summary_items(
             if core_driver.get("row") is not None
             else str(core_driver.get("title") or core_driver.get("event_topic") or "油市供应消息")
         )
-        items.append(
+        add(
             f"价格归因：Brent{strongest.get('direction') or '异动'}{_fmt_pct(strongest.get('cumulative_pct'))}，"
-            f"最强正式归因线索为{title}（{strongest.get('attribution_judgment')}）。"
+            f"最强正式归因线索为{title}（{strongest.get('attribution_judgment')}）。",
+            title,
         )
     else:
         unexplained_count = len(movement_review.get("unexplained") or [])
-        items.append(f"价格归因：本窗口有{unexplained_count}段显著价格异动尚无正式新闻解释。")
+        if unexplained_count:
+            movement_evidence = f"本窗口有{unexplained_count}段显著价格异动尚无正式新闻解释。"
+        else:
+            movement_evidence = "本窗口没有需要单列的“价格异动但新闻解释不足”事件。"
+        add(f"价格归因：{movement_evidence}", movement_evidence)
 
-    homepage_items = list(homepage_presentation.unmatched_major_items)
-    if homepage_items:
-        item = homepage_items[0]
+    item = _highest_priority_unmatched_homepage_item(homepage_presentation)
+    if item:
         homepage_text = str(item.get("title") or item.get("summary") or "").strip()
         if homepage_text:
-            items.append(f"首页重大事项：{homepage_text}")
+            add(f"首页重大事项：{homepage_text}", homepage_text)
 
-    if trump_update.get("status") == "success":
-        statements = list(trump_update.get("statements") or [])
-        if statements:
-            text = str(statements[0].get("text") or "").strip()
-            if text:
-                items.append(f"特朗普表态：{text}")
+    statement = _highest_priority_trump_statement(trump_update)
+    if statement:
+        text = str(statement.get("text") or "").strip()
+        if text:
+            add(f"特朗普表态：{text}", text)
 
-    if external_update.get("status") == "success":
-        source_value = external_update.get("source_key_takeaways_count")
-        source_count = int(
-            source_value
-            if source_value is not None
-            else len(external_update.get("source_key_takeaways") or [])
-        )
-        translated = list(external_update.get("key_takeaways_zh") or [])
-        translated_value = external_update.get("translated_key_takeaways_count")
-        translated_count = int(
-            translated_value if translated_value is not None else len(translated)
-        )
-        if source_count > 0 and source_count == translated_count == len(translated):
-            items.append(f"ISW研判：{_first_isw_takeaway_text(translated)}")
+    translated, _isw_failure_reason = _validated_isw_key_takeaways(external_update)
+    if translated:
+        first_takeaway = _first_isw_takeaway_text(translated)
+        add(f"ISW研判：{first_takeaway}", first_takeaway)
 
     deduplicated: list[str] = []
     seen: set[str] = set()
-    for item in items:
-        normalized = " ".join(str(item).split()).casefold()
+    for rendered, evidence in candidates:
+        normalized = _normalized_summary_evidence(evidence)
         if not normalized or normalized in seen:
             continue
         seen.add(normalized)
-        deduplicated.append(item)
+        deduplicated.append(rendered)
         if len(deduplicated) == 5:
             break
     if len(deduplicated) < 2:
         coverage = str(audit.get("data_integrity") or "未知")
         deduplicated.append(f"报告覆盖：报告状态{report_status}，数据完整性{coverage}。")
     return deduplicated[:5]
+
+
+def _unmatched_homepage_summary_lines(
+    item: Mapping[str, object] | None,
+) -> list[str]:
+    if not item:
+        return []
+    title = str(item.get("title") or item.get("summary") or "").strip()
+    if not title:
+        return []
+    time_text = str(item.get("time") or "").strip()
+    url = str(item.get("url") or "").strip()
+    heading = f"- {time_text}｜{title}" if time_text else f"- {title}"
+    lines = ["## 首页重大事项（未匹配显著异动）", "", heading]
+    if url:
+        lines.append(f"  原文链接：{url}")
+    lines.extend(
+        [
+            "  说明：该事项尚未匹配显著Brent异动，仅作为未定价重大事项展示，不构成正式价格归因。",
+            "",
+        ]
+    )
+    return lines
 
 
 def _new_requirement_audit_lines(
@@ -4883,19 +4986,8 @@ def _new_requirement_audit_lines(
         for group in groups
         if group.get("cumulative_pct") is None or group.get("max_30m_pct") is None
     ]
-    external_success = str(external_update.get("status") or "failed") == "success"
-    source_value = external_update.get("source_key_takeaways_count")
-    source_count = int(
-        source_value
-        if source_value is not None
-        else len(external_update.get("source_key_takeaways") or [])
-    )
-    translated_value = external_update.get("translated_key_takeaways_count")
-    translated_count = int(
-        translated_value
-        if translated_value is not None
-        else len(external_update.get("key_takeaways_zh") or [])
-    )
+    validated_takeaways, _isw_failure_reason = _validated_isw_key_takeaways(external_update)
+    external_success = bool(validated_takeaways)
 
     lines = [
         "## 8. 本次新增需求专项审计",
@@ -4949,7 +5041,7 @@ def _new_requirement_audit_lines(
             f"- 外部update换算时间（北京）：{external_update.get('published_at_bj') or 'N/A'}。",
             f"- 外部update标题：{external_update.get('title') or 'N/A'}。",
             f"- 外部update链接：{external_update.get('url') or ISW_LISTING_URL}。",
-            f"- 外部内容是否成功翻译并写入“今日关注什么”：{'是' if external_success and source_count > 0 and source_count == translated_count else '否'}。",
+            f"- 外部内容是否成功翻译并写入“今日关注什么”：{'是' if external_success else '否'}。",
         ]
     )
     if not external_success:
@@ -4962,19 +5054,11 @@ def _external_source_integrity_lines(
     external_update: Mapping[str, object],
     trump_update: Mapping[str, object],
 ) -> list[str]:
-    isw_success = external_update.get("status") == "success"
-    source_value = external_update.get("source_key_takeaways_count")
-    source_count = int(
-        source_value
-        if source_value is not None
-        else len(external_update.get("source_key_takeaways") or [])
-    )
+    source_count = len(external_update.get("source_key_takeaways") or [])
     translations = list(external_update.get("key_takeaways_zh") or [])
-    translated_value = external_update.get("translated_key_takeaways_count")
-    translated_count = int(
-        translated_value if translated_value is not None else len(translations)
-    )
-    rendered_count = len(translations) if isw_success else 0
+    translated_count = len(translations)
+    validated_takeaways, _isw_failure_reason = _validated_isw_key_takeaways(external_update)
+    rendered_count = len(validated_takeaways)
     statements = sorted(
         list(trump_update.get("statements") or []),
         key=lambda statement: str(statement.get("published_at_utc") or statement.get("published_at_bj") or ""),
@@ -5278,6 +5362,7 @@ def build_markdown_report(
             audit,
         )
 
+    summary_homepage_item = _highest_priority_unmatched_homepage_item(homepage_presentation)
     top_summary_items = _top_summary_items(
         brent_summary,
         movement_review,
@@ -5339,6 +5424,7 @@ def build_markdown_report(
     lines.extend(_price_movement_review_lines(movement_review, timezone_name))
     lines.extend(_unexplained_price_movement_lines(movement_review, timezone_name, include_chart_ids=False))
     lines.extend(_unpriced_risk_lines(audit, watch_rows, selected_raw_ids, timezone_name))
+    lines.extend(_unmatched_homepage_summary_lines(summary_homepage_item))
     lines.extend(["## 市场主要驱动与下一时段判断", ""])
     lines.extend(_movement_driver_lines(movement_review, brent_summary, timezone_name, audit=audit))
     lines.extend([""])
@@ -5754,23 +5840,16 @@ def _concise_isw_dashboard_text(text: str) -> str:
 
 def _isw_dashboard_items(external_update: dict[str, object]) -> list[dict[str, str]]:
     source_url = str(external_update.get("url") or external_update.get("listing_url") or ISW_LISTING_URL)
-    if str(external_update.get("status") or "failed") != "success":
+    key_takeaways, failure_reason = _validated_isw_key_takeaways(external_update)
+    if not key_takeaways:
         return [
             {
-                "text": ISW_FAILURE_COPY,
+                "text": failure_reason,
                 "url": source_url,
                 "link_label": "查看ISW列表",
             }
         ]
 
-    key_takeaways_zh = external_update.get("key_takeaways_zh")
-    key_takeaways = (
-        list(key_takeaways_zh)
-        if key_takeaways_zh is not None
-        else list(external_update.get("summary_zh") or [])[:4]
-    )
-    supplements = list(external_update.get("supplemental_zh") or [])
-    energy_items = list(external_update.get("energy_significance_zh") or [])
     published_et = str(external_update.get("published_at_et") or "")
     published_bj = str(external_update.get("published_at_bj") or "")
     items: list[dict[str, str]] = []
@@ -5782,14 +5861,10 @@ def _isw_dashboard_items(external_update: dict[str, object]) -> list[dict[str, s
                 "link_label": "查看ISW原文",
             }
         )
-    for text in key_takeaways + supplements:
+    for text in key_takeaways:
         concise = _concise_isw_dashboard_text(str(text))
         if concise:
             items.append({"text": concise, "url": source_url, "link_label": "查看ISW原文"})
-    for text in energy_items:
-        concise = _concise_isw_dashboard_text(str(text))
-        if concise:
-            items.append({"text": f"能源与航运影响：{concise}", "url": source_url, "link_label": "查看ISW原文"})
     if not items:
         items.append(
             {

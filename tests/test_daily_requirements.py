@@ -98,6 +98,7 @@ class DailyRequirementTests(unittest.TestCase):
         """Changing source counts or omitting grouped source IDs breaks audit traceability."""
         external_update = {
             "status": "success",
+            "source_key_takeaways": [f"Source takeaway {index}" for index in range(1, 9)],
             "source_key_takeaways_count": 8,
             "translated_key_takeaways_count": 8,
             "key_takeaways_zh": [f"中文要点{index}" for index in range(1, 9)],
@@ -149,6 +150,47 @@ class DailyRequirementTests(unittest.TestCase):
             "来源ID：102",
         ):
             self.assertIn(expected, audit)
+
+    def test_isw_strict_output_rejects_malformed_and_legacy_success_payloads(self) -> None:
+        """Only one-to-one official Key Takeaways may reach Markdown, dashboard, or rendered Audit counts."""
+        malformed = {
+            "status": "success",
+            "title": "Iran Update, August 4, 2026",
+            "published_at_et": "2026-08-04 18:30",
+            "published_at_bj": "2026-08-05 06:30",
+            "url": "https://understandingwar.org/research/middle-east/iran-update-august-4-2026/",
+            "source_key_takeaways": ["source one", "source two"],
+            "key_takeaways_zh": ["不应渲染的单条翻译"],
+            "source_key_takeaways_count": 2,
+            "translated_key_takeaways_count": 1,
+        }
+        legacy = {
+            "status": "success",
+            "title": "Legacy Iran Update",
+            "url": "https://understandingwar.org/research/middle-east/legacy/",
+            "summary_zh": ["旧版正文不应渲染"],
+        }
+        trump_update = {"status": "failed", "failure_reason": "test"}
+
+        for payload, forbidden in (
+            (malformed, "不应渲染的单条翻译"),
+            (legacy, "旧版正文不应渲染"),
+        ):
+            markdown = "\n".join(tracking_report._tracking_outlook_lines(payload))
+            dashboard = tracking_report._isw_dashboard_items(payload)
+            audit = "\n".join(
+                tracking_report._external_source_integrity_lines(payload, trump_update)
+            )
+
+            self.assertIn("完整性校验失败", markdown)
+            self.assertIn(str(payload["title"]), markdown)
+            self.assertIn(str(payload["url"]), markdown)
+            self.assertNotIn(forbidden, markdown)
+            self.assertNotRegex(markdown, r"(?m)^\d+\. ")
+            self.assertEqual(len(dashboard), 1)
+            self.assertIn("完整性校验失败", dashboard[0]["text"])
+            self.assertNotIn(forbidden, dashboard[0]["text"])
+            self.assertIn("ISW Key Takeaways正文渲染数量：0", audit)
 
     def test_news_direction_uses_new_fact_instead_of_price_or_risk_keyword(self) -> None:
         denial = market_bias_for_event(

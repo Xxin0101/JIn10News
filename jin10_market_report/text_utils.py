@@ -55,3 +55,6 @@ def split_sentences(value: str) -> list[str]:
 
 def compact_spaces(value: str) -> str:
     return re.sub(r"\s+", " ", strip_html(value)).strip()
+
+# Probe constant for Codex Manager local-link verification (safe to keep).
+CODEX_MANAGER_LINK_PROBE = "codex-manager-local-link-ok"

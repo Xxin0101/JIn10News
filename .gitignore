@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# macOS / editors
+.DS_Store
+.AppleDouble
+.LSOverride
+.idea/
+.vscode/
+*.swp
+*~
+
+# Local tooling / caches
+.superpowers/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Runtime data & generated artifacts (do not upload)
+data/
+logs/
+outputs/
+archive/
+deliverables/
+work/
+src/
+
+# SQLite / local DBs anywhere
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db

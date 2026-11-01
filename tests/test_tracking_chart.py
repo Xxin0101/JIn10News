@@ -81,6 +81,43 @@ class TrackingChartTests(unittest.TestCase):
         rendered = build_html_report(markdown, output_dir).read_text(encoding="utf-8")
         return markdown_text, rendered
 
+    def test_formal_html_reads_generated_range_headers_into_brent_metric_cards(self) -> None:
+        """Changing the generated table labels must not turn real Brent metrics into N/A."""
+        with tempfile.TemporaryDirectory() as directory:
+            output_dir = Path(directory)
+            markdown = output_dir / "Jin10_Brent_Rolling_Reaction_metrics.md"
+            markdown.write_text(
+                "# 日报\n\n"
+                "## 今日重点（Executive Summary）\n\n"
+                "- 本窗口摘要。\n\n"
+                "## 今日 Brent 价格预测\n\n"
+                "- 预测日期：2026-09-04\n\n"
+                "统计窗口：2026-09-03 08:00 至 2026-09-04 08:00（Asia/Shanghai）\n"
+                "数据来源：金十数据快讯｜Yahoo Finance / BZ=F / 5m\n\n"
+                "## 本窗口Brent表现\n\n"
+                "| 最新价 | 24小时涨跌幅 | 区间最高价 | 区间最低价 |\n"
+                "| ---: | ---: | ---: | ---: |\n"
+                "| 95.92 | +0.81% | 97.61 | 94.04 |\n",
+                encoding="utf-8",
+            )
+
+            rendered = build_html_report(markdown, output_dir).read_text(encoding="utf-8")
+
+        for label, value in (
+            ("最新价", "95.92"),
+            ("24小时涨跌幅", "+0.81%"),
+            ("日内最高价", "97.61"),
+            ("日内最低价", "94.04"),
+        ):
+            self.assertIn(
+                f'<span class="metric-label">{label}</span><span class="metric-value',
+                rendered,
+            )
+            self.assertRegex(
+                rendered,
+                rf'<span class="metric-label">{re.escape(label)}</span><span class="metric-value[^>]*>{re.escape(value)}</span>',
+            )
+
     def test_isw_and_today_watch_always_render_on_success(self) -> None:
         external_update = {
             "status": "success",
@@ -275,8 +312,14 @@ class TrackingChartTests(unittest.TestCase):
         self.assertIn("## ISW Iran Update", markdown)
         self.assertNotIn("**重要事实：**", markdown)
         self.assertNotIn("**对原油供应", markdown)
-        self.assertLess(markdown.index("## 今日重点（Executive Summary）"), markdown.index("统计窗口："))
-        summary_section = markdown.split("## 今日重点（Executive Summary）", 1)[1].split("统计窗口：", 1)[0]
+        self.assertLess(
+            markdown.index("## 今日重点（Executive Summary）"),
+            markdown.index("## 今日 Brent 价格预测"),
+        )
+        self.assertLess(markdown.index("## 今日 Brent 价格预测"), markdown.index("统计窗口："))
+        summary_section = markdown.split("## 今日重点（Executive Summary）", 1)[1].split(
+            "## 今日 Brent 价格预测", 1
+        )[0]
         self.assertGreaterEqual(summary_section.count("- "), 2)
         self.assertLessEqual(summary_section.count("- "), 5)
         for evidence in (
@@ -382,6 +425,42 @@ class TrackingChartTests(unittest.TestCase):
         self.assertNotIn("首页重大事项：伊朗称霍尔木兹航运安全", items)
         self.assertIn("特朗普表态：同主题最新且ID最小的霍尔木兹表态。", items)
         self.assertNotIn("特朗普表态：较新的伊朗一般表态。", items)
+
+    def test_top_summary_extracts_the_relevant_clean_trump_digest_section(self) -> None:
+        """A multi-topic digest must not flood the cover summary with HTML and unrelated items."""
+        trump_update = {
+            "status": "success",
+            "statements": [
+                {
+                    "statement_id": "digest",
+                    "published_at_utc": "2026-08-23T10:44:20Z",
+                    "topics": ["霍尔木兹", "战争与军事行动"],
+                    "text": (
+                        '1. 在议息次日调仓 <span class="section-news">1. <b>调整股票持仓</b>'
+                        '——卖出Meta并买入Visa。</span><br/>'
+                        '<span class="section-news">2. <b>宣称霍尔木兹海峡是美国新领土</b>'
+                        '——特朗普发布海峡地图并配文：“美国的新领土。”</span><br/>'
+                        '<span class="section-news">3. <b>讥讽加拿大</b>——关税表态。</span>'
+                    ),
+                }
+            ],
+        }
+
+        items = _top_summary_items(
+            {"latest": "93.40", "pct": "+0.27%", "high": "94.81", "low": "92.77"},
+            {"groups": [], "unexplained": []},
+            FormalReportPresentation(panel_groups=(), unmatched_major_items=(), iran_update_items=()),
+            trump_update,
+            {"status": "failed", "failure_reason": "test"},
+            "FORMAL",
+            {"data_integrity": "完整"},
+        )
+
+        summary = next(item for item in items if item.startswith("特朗普表态："))
+        self.assertIn("霍尔木兹海峡是美国新领土", summary)
+        self.assertNotIn("Meta", summary)
+        self.assertNotIn("<span", summary)
+        self.assertNotIn("讥讽加拿大", summary)
 
     def test_top_summary_normalizes_evidence_dedup_and_excludes_failed_sources(self) -> None:
         """Prefix and punctuation differences must not duplicate one evidence item."""
@@ -979,6 +1058,29 @@ class TrackingChartTests(unittest.TestCase):
             self.assertNotIn("U01", svg)
             self.assertIn("O 78.00 H 78.80 L 77.80 C 78.50", svg)
             self.assertIn("2026-07-13 08:00 至 2026-07-14 08:00", svg)
+
+    def test_three_day_svg_uses_actual_duration_and_readable_time_ticks(self) -> None:
+        start_bj = datetime(2026, 9, 18, 8, 0, tzinfo=BJ)
+        candles = [
+            ThirtyMinuteCandle(start_bj, 104.0, 104.2, 103.8, 104.1, 6),
+            ThirtyMinuteCandle(start_bj + timedelta(days=2, hours=22), 99.0, 99.2, 98.8, 99.1, 6),
+        ]
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "weekend_brent_24h.svg"
+            artifact = render_brent_24h_svg(
+                candles,
+                [],
+                start_bj,
+                start_bj + timedelta(days=3),
+                path,
+                "Yahoo Finance / BZ=F / 5m",
+            )
+            self.assertIsNotNone(artifact)
+            svg = path.read_text(encoding="utf-8")
+
+        self.assertIn("Brent 72小时价格走势", svg)
+        self.assertLessEqual(svg.count('y="574.0"'), 13)
 
     def test_audit_style_unexplained_lines_never_receive_chart_ids_by_default(self) -> None:
         start = datetime(2026, 7, 13, 0, 0, tzinfo=UTC)

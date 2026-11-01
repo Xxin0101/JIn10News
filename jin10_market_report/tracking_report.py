@@ -26,6 +26,7 @@ from .eventing import (
 )
 from .external_update import ISW_LISTING_URL, fetch_latest_isw_update
 from .storage import TrackerStore
+from .text_utils import strip_html, truncate
 from .trump_update import fetch_trump_statements
 from .tracking_chart import (
     aggregate_30m_klines,
@@ -41,6 +42,8 @@ PRICE_CONTINUITY_REVIEW_THRESHOLD = 0.05
 PENDING_REACTION_NOTE = "新闻已纳入，但截至08:00后续60分钟价格观察尚未完成，暂不做最终归因。"
 UNCONFIRMED_REACTION_NOTE = "已有部分价格数据，但暂时无法确认价格反应。"
 ISW_FAILURE_COPY = "本次ISW抓取失败，以下内容待下次运行补充。"
+ISW_NOT_APPLICABLE_COPY = "周五快照模式未纳入ISW；不触发周末抓取或补跑。"
+TRUMP_NOT_APPLICABLE_COPY = "周五快照模式未纳入金十特朗普专栏；不触发周末抓取或补跑。"
 
 
 @dataclass(frozen=True)
@@ -54,6 +57,8 @@ class FormalReportPresentation:
     display_summary: Optional[dict[str, object]] = None
     event_groups: tuple[dict[str, object], ...] = ()
     homepage_representations: Optional[dict[str, str]] = None
+    forecast: Optional[dict[str, object]] = None
+    price_layer: Optional[dict[str, object]] = None
 
 
 @dataclass(frozen=True)
@@ -79,6 +84,21 @@ def beijing_day_bounds(day: datetime | None = None, timezone_name: str = "Asia/S
         local_end = datetime.combine(local_day.date(), ROLLING_CUTOFF, tzinfo=tz)
     local_start = local_end - timedelta(days=1)
     return local_start.astimezone(ZoneInfo("UTC")), local_end.astimezone(ZoneInfo("UTC")), local_end.strftime("%Y%m%d_0800")
+
+
+def _report_window_copy(start_utc: datetime, end_utc: datetime) -> dict[str, str]:
+    hours = int((ensure_utc(end_utc) - ensure_utc(start_utc)).total_seconds() // 3600)
+    if hours <= 24:
+        return {
+            "performance_label": "24小时涨跌幅",
+            "news_scope_note": "不含截止时刻",
+            "chart_label": "Brent 24小时30分钟K线与关键新闻事件",
+        }
+    return {
+        "performance_label": f"{hours}小时涨跌幅",
+        "news_scope_note": "覆盖周末新闻，截止时刻不含",
+        "chart_label": f"Brent {hours}小时30分钟K线与关键新闻事件",
+    }
 
 
 def _format_bj(value: datetime | None, timezone_name: str = "Asia/Shanghai", with_seconds: bool = False) -> str:
@@ -449,15 +469,7 @@ def _raw_oil_status(row) -> tuple[bool, str, str]:
 
 def _segment_counts(raw_rows: list, start_utc: datetime, end_utc: datetime, timezone_name: str) -> dict[str, int]:
     tz = ZoneInfo(timezone_name)
-    start_local = start_utc.astimezone(tz)
-    end_local = end_utc.astimezone(tz)
-    mid16 = datetime.combine(start_local.date(), time(16, 0), tzinfo=tz)
-    midnight = datetime.combine(end_local.date(), time.min, tzinfo=tz)
-    segments = {
-        "08:00-16:00": (start_local, mid16),
-        "16:00-00:00": (mid16, midnight),
-        "00:00-08:00": (midnight, end_local),
-    }
+    segments = _segment_ranges(start_utc, end_utc, timezone_name)
     counts = dict.fromkeys(segments.keys(), 0)
     for row in raw_rows:
         published = parse_iso_utc(row["published_at_utc"])
@@ -565,11 +577,41 @@ def _is_expected_brent_maintenance_gap(
     previous_local = previous_utc.astimezone(ZoneInfo(timezone_name))
     current_local = current_utc.astimezone(ZoneInfo(timezone_name))
     gap = current_utc - previous_utc
-    return (
+    daily_maintenance = (
         previous_local.date() == current_local.date()
         and time(4, 45) <= previous_local.time() <= time(5, 10)
         and time(5, 50) <= current_local.time() <= time(6, 15)
         and timedelta(minutes=45) <= gap <= timedelta(minutes=90)
+    )
+    weekend_closure = (
+        previous_local.weekday() == 5
+        and current_local.weekday() == 0
+        and current_local.date() - previous_local.date() == timedelta(days=2)
+        and time(4, 45) <= previous_local.time() <= time(5, 10)
+        and time(5, 50) <= current_local.time() <= time(6, 15)
+        and timedelta(days=2) <= gap <= timedelta(days=2, hours=2)
+    )
+    return daily_maintenance or weekend_closure
+
+
+def _is_expected_brent_weekend_start_boundary(
+    window_start_utc: datetime,
+    first_price_utc: datetime,
+    timezone_name: str,
+) -> bool:
+    """Return whether a weekend window legitimately starts at Monday's open."""
+    window_start_local = window_start_utc.astimezone(ZoneInfo(timezone_name))
+    first_price_local = first_price_utc.astimezone(ZoneInfo(timezone_name))
+    if window_start_local.weekday() not in {5, 6}:
+        return False
+    if window_start_local.weekday() == 5 and window_start_local.time() < time(5, 0):
+        return False
+    days_to_monday = (7 - window_start_local.weekday()) % 7
+    expected_monday = window_start_local.date() + timedelta(days=days_to_monday)
+    return (
+        first_price_local.weekday() == 0
+        and first_price_local.date() == expected_monday
+        and time(5, 50) <= first_price_local.time() <= time(6, 15)
     )
 
 
@@ -594,11 +636,26 @@ def _reaction_observation_status(
     return "UNCONFIRMED", UNCONFIRMED_REACTION_NOTE
 
 
-def _build_window_audit(store: TrackerStore, brent: BrentConfig, start_utc: datetime, end_utc: datetime, timezone_name: str) -> dict[str, object]:
-    raw_rows = store.raw_news_between(start_utc, end_utc)
+def _build_window_audit_core(
+    store: TrackerStore,
+    brent: BrentConfig,
+    start_utc: datetime,
+    end_utc: datetime,
+    timezone_name: str,
+    *,
+    news_start_utc: datetime | None = None,
+    news_end_utc: datetime | None = None,
+    freshness_policy: str,
+) -> dict[str, object]:
+    if freshness_policy not in {"live", "frozen_friday_snapshot"}:
+        raise ValueError(f"未知审计新鲜度策略: {freshness_policy}")
+    live_freshness = freshness_policy == "live"
+    news_start = ensure_utc(news_start_utc or start_utc)
+    news_end = ensure_utc(news_end_utc or end_utc)
+    raw_rows = store.raw_news_between(news_start, news_end)
     first_raw = parse_iso_utc(raw_rows[0]["published_at_utc"]) if raw_rows else None
     last_raw = parse_iso_utc(raw_rows[-1]["published_at_utc"]) if raw_rows else None
-    reaction_news_rows = store.news_for_reaction_range(start_utc, end_utc)
+    reaction_news_rows = store.news_for_reaction_range(news_start, news_end)
     last_reaction_news = (
         parse_iso_utc(reaction_news_rows[-1]["published_at_utc"]) if reaction_news_rows else None
     )
@@ -636,10 +693,10 @@ def _build_window_audit(store: TrackerStore, brent: BrentConfig, start_utc: date
     expected_maintenance_gaps = [
         gap for gap in price_gaps if bool(gap["expected_maintenance"])
     ]
-    segments = _segment_counts(raw_rows, start_utc, end_utc, timezone_name)
+    segments = _segment_counts(raw_rows, news_start, news_end, timezone_name)
     reaction_rows = [
         row
-        for row in store.reaction_rows_between(start_utc, end_utc)
+        for row in store.reaction_rows_between(news_start, news_end)
         if not int(_val(row, "is_duplicate") or 0)
     ]
 
@@ -656,24 +713,47 @@ def _build_window_audit(store: TrackerStore, brent: BrentConfig, start_utc: date
             major_candidates.append((row, oil_reason, major_reason))
 
     news_coverage_gaps: list[str] = []
-    for label, count in segments.items():
-        if count == 0:
-            news_coverage_gaps.append(f"{label} 原始新闻数量为0，需复核分页或接口覆盖。")
-    if not raw_rows:
-        news_coverage_gaps.append("窗口内没有原始新闻记录。")
-    else:
-        if first_raw and first_raw > start_utc + timedelta(minutes=30):
-            news_coverage_gaps.append(
-                f"原始新闻最早仅到{_bj_full(iso_utc(first_raw), timezone_name)}，可能未覆盖窗口起始附近。"
-            )
-        if last_raw and last_raw < end_utc - timedelta(hours=2):
-            news_coverage_gaps.append(
-                f"原始新闻最晚仅到{_bj_full(iso_utc(last_raw), timezone_name)}，未覆盖其后至窗口截止。"
-            )
+    if live_freshness:
+        for label, count in segments.items():
+            if count == 0:
+                news_coverage_gaps.append(f"{label} 原始新闻数量为0，需复核分页或接口覆盖。")
+        if not raw_rows:
+            news_coverage_gaps.append("窗口内没有原始新闻记录。")
+        else:
+            if first_raw and first_raw > news_start + timedelta(minutes=30):
+                news_coverage_gaps.append(
+                    f"原始新闻最早仅到{_bj_full(iso_utc(first_raw), timezone_name)}，可能未覆盖窗口起始附近。"
+                )
+            if last_raw and last_raw < news_end - timedelta(hours=2):
+                news_coverage_gaps.append(
+                    f"原始新闻最晚仅到{_bj_full(iso_utc(last_raw), timezone_name)}，未覆盖其后至窗口截止。"
+                )
+    elif not raw_rows:
+        news_coverage_gaps.append("周五冻结快照对应的本地新闻记录为空。")
     coverage_gaps = list(news_coverage_gaps)
     price_coverage_tolerance = timedelta(minutes=10)
-    price_start_covered = bool(first_price and first_price <= price_start + price_coverage_tolerance)
-    price_end_covered = bool(last_price and last_price >= price_end - price_coverage_tolerance)
+    price_bar_span = timedelta(minutes=5) if brent.interval == "5m" else timedelta(0)
+    if live_freshness:
+        price_start_covered = bool(
+            first_price
+            and (
+                first_price <= price_start + price_coverage_tolerance
+                or _is_expected_brent_weekend_start_boundary(
+                    price_start,
+                    first_price,
+                    timezone_name,
+                )
+            )
+        )
+        price_end_covered = bool(
+            last_price
+            and last_price + price_bar_span >= price_end - price_coverage_tolerance
+        )
+    else:
+        # A validated Friday snapshot is bounded by its last trading session,
+        # not by the wall clock on Saturday or Sunday.
+        price_start_covered = bool(price_rows)
+        price_end_covered = bool(price_rows)
     price_boundary_covered = price_start_covered and price_end_covered
     price_continuity_issues = _price_continuity_issues(price_rows)
     price_continuity_ok = not price_continuity_issues
@@ -682,12 +762,12 @@ def _build_window_audit(store: TrackerStore, brent: BrentConfig, start_utc: date
     if not price_rows:
         coverage_gaps.append("Brent 5分钟K线为空。")
     else:
-        if not price_start_covered:
+        if live_freshness and not price_start_covered:
             coverage_gaps.append(
                 f"Brent统计窗口起点未覆盖：要求到{_bj_full(iso_utc(price_start), timezone_name)}附近，"
                 f"实际最早为{_bj_full(iso_utc(first_price), timezone_name) if first_price else 'N/A'}。"
             )
-        if not price_end_covered:
+        if live_freshness and not price_end_covered:
             coverage_gaps.append(
                 f"Brent统计窗口截止未覆盖：要求到{_bj_full(iso_utc(price_end), timezone_name)}前10分钟内，"
                 f"实际最晚为{_bj_full(iso_utc(last_price), timezone_name) if last_price else 'N/A'}。"
@@ -787,16 +867,29 @@ def _build_window_audit(store: TrackerStore, brent: BrentConfig, start_utc: date
     # checks, but do not downgrade the whole day when both boundaries and the
     # timestamp stream are otherwise valid.
     price_covered = price_boundary_covered and price_timestamp_quality_ok
-    news_freshness = "passed" if news_covered and raw_rows else "failed"
-    price_freshness = "passed" if price_covered and price_rows else "failed"
+    if live_freshness:
+        news_freshness = "passed" if news_covered and raw_rows else "failed"
+        price_freshness = "passed" if price_covered and price_rows else "failed"
+        data_complete = bool(news_freshness == "passed" and price_freshness == "passed")
+    else:
+        news_freshness = "not_applicable"
+        price_freshness = "not_applicable"
+        data_complete = bool(news_covered and price_covered)
     if raw_rows or price_rows:
-        data_integrity = "完整" if news_freshness == "passed" and price_freshness == "passed" else "部分缓存"
+        data_integrity = "完整" if data_complete else "部分缓存"
     else:
         data_integrity = "不完整"
     anomalies = _scan_price_anomalies(store, brent, start_utc, end_utc)
     for anomaly in anomalies:
         center = parse_iso_utc(str(anomaly["start_utc"]))
-        nearby = store.raw_news_near(center or start_utc, minutes=45)
+        nearby = [
+            row
+            for row in store.raw_news_near(center or start_utc, minutes=45)
+            if (
+                (published := parse_iso_utc(str(_val(row, "published_at_utc") or ""))) is not None
+                and news_start <= published < news_end
+            )
+        ]
         anomaly["nearby_news"] = nearby[:8]
         direct_nearby = []
         for row in nearby:
@@ -814,6 +907,8 @@ def _build_window_audit(store: TrackerStore, brent: BrentConfig, start_utc: date
         "first_raw": first_raw,
         "last_raw": last_raw,
         "last_reaction_news": last_reaction_news,
+        "news_start_required": news_start,
+        "news_end_required": news_end,
         "price_start_required": price_start,
         "price_end_required": price_end,
         "price_coverage_tolerance_minutes": int(price_coverage_tolerance.total_seconds() // 60),
@@ -845,6 +940,7 @@ def _build_window_audit(store: TrackerStore, brent: BrentConfig, start_utc: date
         "price_covered": price_covered,
         "news_freshness": news_freshness,
         "price_freshness": price_freshness,
+        "freshness_policy": freshness_policy,
         "data_integrity": data_integrity,
         "coverage_gaps": coverage_gaps,
         "news_coverage_gaps": news_coverage_gaps,
@@ -856,8 +952,52 @@ def _build_window_audit(store: TrackerStore, brent: BrentConfig, start_utc: date
         "price_point_missing_counts": price_point_missing_counts,
         "price_missing_details": price_missing_details,
         "anomalies": anomalies,
-        "data_complete": bool(news_freshness == "passed" and price_freshness == "passed"),
+        "data_complete": data_complete,
     }
+
+
+def _build_window_audit(
+    store: TrackerStore,
+    brent: BrentConfig,
+    start_utc: datetime,
+    end_utc: datetime,
+    timezone_name: str,
+    *,
+    news_start_utc: datetime | None = None,
+    news_end_utc: datetime | None = None,
+) -> dict[str, object]:
+    return _build_window_audit_core(
+        store,
+        brent,
+        start_utc,
+        end_utc,
+        timezone_name,
+        news_start_utc=news_start_utc,
+        news_end_utc=news_end_utc,
+        freshness_policy="live",
+    )
+
+
+def _build_frozen_snapshot_audit(
+    store: TrackerStore,
+    brent: BrentConfig,
+    start_utc: datetime,
+    end_utc: datetime,
+    timezone_name: str,
+    *,
+    news_start_utc: datetime | None = None,
+    news_end_utc: datetime | None = None,
+) -> dict[str, object]:
+    return _build_window_audit_core(
+        store,
+        brent,
+        start_utc,
+        end_utc,
+        timezone_name,
+        news_start_utc=news_start_utc,
+        news_end_utc=news_end_utc,
+        freshness_policy="frozen_friday_snapshot",
+    )
 
 
 def _homepage_candidate_is_eligible(candidate: dict[str, object]) -> bool:
@@ -2060,6 +2200,15 @@ def _segment_ranges(start_utc: datetime, end_utc: datetime, timezone_name: str) 
     tz = ZoneInfo(timezone_name)
     start_local = start_utc.astimezone(tz)
     end_local = end_utc.astimezone(tz)
+    if end_local - start_local > timedelta(days=1, minutes=1):
+        segments: dict[str, tuple[datetime, datetime]] = {}
+        cursor = start_local
+        while cursor < end_local:
+            segment_end = min(cursor + timedelta(hours=8), end_local)
+            label = f"{cursor.strftime('%Y-%m-%d %H:%M')}-{segment_end.strftime('%m-%d %H:%M')}"
+            segments[label] = (cursor, segment_end)
+            cursor = segment_end
+        return segments
     mid16 = datetime.combine(start_local.date(), time(16, 0), tzinfo=tz)
     midnight = datetime.combine(end_local.date(), time.min, tzinfo=tz)
     return {
@@ -3211,7 +3360,12 @@ def _build_price_movement_review(
     start_utc: datetime,
     end_utc: datetime,
     timezone_name: str,
+    *,
+    news_start_utc: datetime | None = None,
+    news_end_utc: datetime | None = None,
 ) -> dict[str, object]:
+    news_start = ensure_utc(news_start_utc or start_utc)
+    news_end = ensure_utc(news_end_utc or end_utc)
     windows, price_rows = _scan_30m_price_windows(store, brent, start_utc, end_utc)
     metric_price_rows = store.brent_day_klines(
         brent.symbol,
@@ -3221,8 +3375,8 @@ def _build_price_movement_review(
     )
     groups = _merge_price_windows(windows, metric_price_rows)
     reaction_rows = store.reaction_rows_between(
-        start_utc - timedelta(minutes=45),
-        end_utc + timedelta(minutes=15),
+        news_start if news_start_utc is not None else start_utc - timedelta(minutes=45),
+        news_end if news_end_utc is not None else end_utc + timedelta(minutes=15),
     )
     reaction_by_id = {str(_val(row, "news_id") or ""): row for row in reaction_rows}
     selected_raw_ids: set[str] = set()
@@ -3232,7 +3386,9 @@ def _build_price_movement_review(
     for group in groups:
         search_start = ensure_utc(group["search_start_dt"])
         search_end = ensure_utc(group["search_end_dt"])
-        nearby = store.raw_news_between(search_start, search_end)
+        bounded_start = max(search_start, news_start)
+        bounded_end = min(search_end, news_end)
+        nearby = store.raw_news_between(bounded_start, bounded_end) if bounded_start < bounded_end else []
         candidates = [_score_movement_candidate(row, group) for row in nearby]
         for item in candidates:
             reaction = reaction_by_id.get(str(item.get("raw_id") or ""))
@@ -4672,6 +4828,8 @@ def _extra_tracking_items(audit: dict[str, object], selected_raw_ids: Iterable[s
 def _validated_isw_key_takeaways(
     external_update: Mapping[str, object],
 ) -> tuple[list[str], str]:
+    if external_update.get("status") == "not_applicable":
+        return [], ISW_NOT_APPLICABLE_COPY
     if external_update.get("status") != "success":
         reason = str(external_update.get("failure_reason") or "未知错误")
         return [], f"{ISW_FAILURE_COPY} 失败原因：{reason}"
@@ -4699,6 +4857,7 @@ def _tracking_outlook_lines(external_update: dict[str, object]) -> list[str]:
     source_url = str(external_update.get("url") or external_update.get("listing_url") or ISW_LISTING_URL)
     key_takeaways, failure_reason = _validated_isw_key_takeaways(external_update)
     fetch_success = external_update.get("status") == "success"
+    not_applicable = external_update.get("status") == "not_applicable"
     display_failure = (
         f"抓取成功，但 {failure_reason}"
         if fetch_success and not key_takeaways
@@ -4723,11 +4882,14 @@ def _tracking_outlook_lines(external_update: dict[str, object]) -> list[str]:
     isw_watch = _first_isw_takeaway_text(key_takeaways) if key_takeaways else display_failure
     lines.extend(["", "## 今日关注什么", ""])
     if not key_takeaways:
-        lines.append(
-            "- 抓取成功，但ISW Key Takeaways未通过完整性校验；以下监测清单不引用未校验内容。"
-            if fetch_success
-            else "- 指定网站本次抓取失败，以下内容根据已获取的相关新闻和ISW信息整理。"
-        )
+        if not_applicable:
+            lines.append(f"- {ISW_NOT_APPLICABLE_COPY}")
+        else:
+            lines.append(
+                "- 抓取成功，但ISW Key Takeaways未通过完整性校验；以下监测清单不引用未校验内容。"
+                if fetch_success
+                else "- 指定网站本次抓取失败，以下内容根据已获取的相关新闻和ISW信息整理。"
+            )
     lines.extend(
         [
             "- 霍尔木兹海峡是否继续通行，以及是否出现收费、封锁或护航安排变化；",
@@ -4756,6 +4918,8 @@ def _first_isw_takeaway_text(key_takeaways: Sequence[object]) -> str:
 
 def _trump_statement_lines(trump_update: dict[str, object]) -> list[str]:
     lines = ["## 特朗普相关言论", ""]
+    if trump_update.get("status") == "not_applicable":
+        return lines + [f"- {TRUMP_NOT_APPLICABLE_COPY}", ""]
     if trump_update.get("status") != "success":
         return lines + [f"- 金十特朗普专栏抓取失败：{trump_update.get('failure_reason') or '未知错误'}", ""]
     statements = sorted(
@@ -4778,6 +4942,15 @@ def _trump_statement_lines(trump_update: dict[str, object]) -> list[str]:
 
 
 def _trump_dashboard_items(trump_update: dict[str, object]) -> list[dict[str, object]]:
+    if trump_update.get("status") == "not_applicable":
+        return [
+            {
+                "kind": "status",
+                "status": "not_applicable",
+                "text": TRUMP_NOT_APPLICABLE_COPY,
+                "source_items": [],
+            }
+        ]
     if trump_update.get("status") != "success":
         return [
             {
@@ -4852,6 +5025,43 @@ def _highest_priority_trump_statement(
     return min(statements, key=_trump_summary_priority) if statements else None
 
 
+_TRUMP_SUMMARY_TOPIC_KEYWORDS = {
+    "霍尔木兹": ("霍尔木兹",),
+    "战争与军事行动": ("战争", "军事", "打击", "导弹", "袭击"),
+    "原油与能源": ("原油", "石油", "油价", "能源"),
+    "制裁": ("制裁", "经济孤立", "经济战"),
+    "伊朗": ("伊朗",),
+}
+
+
+def _trump_summary_text(statement: Mapping[str, object]) -> str:
+    raw = str(statement.get("text") or "").strip()
+    if not raw:
+        return ""
+    raw_sections = re.findall(
+        r'<span\s+class=["\']section-news["\'][^>]*>(.*?)</span>',
+        raw,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    sections = [re.sub(r"\s+", " ", strip_html(section)).strip() for section in raw_sections]
+    if sections:
+        topics = {str(topic) for topic in statement.get("topics") or []}
+
+        def section_rank(section: str) -> int:
+            for index, topic in enumerate(_TRUMP_SUMMARY_TOPIC_PRIORITY):
+                if topic not in topics:
+                    continue
+                if any(keyword in section for keyword in _TRUMP_SUMMARY_TOPIC_KEYWORDS[topic]):
+                    return index
+            return len(_TRUMP_SUMMARY_TOPIC_PRIORITY)
+
+        cleaned = min(enumerate(sections), key=lambda item: (section_rank(item[1]), item[0]))[1]
+    else:
+        cleaned = re.sub(r"\s+", " ", strip_html(raw)).strip()
+    cleaned = re.sub(r"^\d+[.\u3001]\s*", "", cleaned)
+    return truncate(cleaned, 180)
+
+
 def _normalized_summary_evidence(text: object) -> str:
     return re.sub(r"[\W_]+", "", str(text or "").casefold(), flags=re.UNICODE)
 
@@ -4918,7 +5128,7 @@ def _top_summary_items(
 
     statement = _highest_priority_trump_statement(trump_update)
     if statement:
-        text = str(statement.get("text") or "").strip()
+        text = _trump_summary_text(statement)
         if text:
             add(f"特朗普表态：{text}", text)
 
@@ -5001,6 +5211,7 @@ def _new_requirement_audit_lines(
     ]
     validated_takeaways, isw_failure_reason = _validated_isw_key_takeaways(external_update)
     fetch_success = external_update.get("status") == "success"
+    external_not_applicable = external_update.get("status") == "not_applicable"
     integrity_success = bool(validated_takeaways)
 
     lines = [
@@ -5049,13 +5260,13 @@ def _new_requirement_audit_lines(
             "",
             "### 外部网站update审计",
             "",
-            f"- 外部网站是否抓取成功：{'是' if fetch_success else '否'}。",
+            f"- 外部网站是否抓取成功：{'不适用（周五快照）' if external_not_applicable else '是' if fetch_success else '否'}。",
             f"- 抓取通道：{external_update.get('fetch_method') or 'N/A'}。",
             f"- 外部update网页发布/更新时间（纽约）：{external_update.get('published_at_et') or 'N/A'}。",
             f"- 外部update换算时间（北京）：{external_update.get('published_at_bj') or 'N/A'}。",
             f"- 外部update标题：{external_update.get('title') or 'N/A'}。",
             f"- 外部update链接：{external_update.get('url') or ISW_LISTING_URL}。",
-            f"- ISW Key Takeaways完整性校验：{'通过' if integrity_success else '失败' if fetch_success else '未执行'}。",
+            f"- ISW Key Takeaways完整性校验：{'不适用' if external_not_applicable else '通过' if integrity_success else '失败' if fetch_success else '未执行'}。",
             f"- 外部内容是否成功翻译并写入“今日关注什么”：{'是' if integrity_success else '否'}。",
         ]
     )
@@ -5063,7 +5274,9 @@ def _new_requirement_audit_lines(
         lines.append(
             f"- ISW Key Takeaways完整性校验失败原因：{isw_failure_reason.rstrip('。')}。"
         )
-    if not fetch_success:
+    if external_not_applicable:
+        lines.append(f"- 外部update未纳入原因：{ISW_NOT_APPLICABLE_COPY}")
+    elif not fetch_success:
         lines.append(f"- 外部update失败原因：{external_update.get('failure_reason') or '未知'}。")
     lines.append("")
     return lines
@@ -5152,6 +5365,7 @@ def _build_audit_report_lines(
     homepage_event_groups: Iterable[dict[str, object]] | None = None,
     homepage_display_summary: Mapping[str, object] | None = None,
     homepage_representations: Mapping[str, str] | None = None,
+    forecast: Mapping[str, object] | None = None,
 ) -> list[str]:
     external_update = external_update or {"status": "failed", "failure_reason": "未执行外部update抓取"}
     trump_update = trump_update or {"status": "failed", "failure_reason": "未执行特朗普专栏抓取"}
@@ -5169,6 +5383,21 @@ def _build_audit_report_lines(
     ]
     if warning_banner:
         lines.extend([f"> {warning_banner}", ""])
+    if forecast:
+        quant_up = forecast.get("quant_up_probability")
+        quant_text = f"{float(quant_up):.1%}" if isinstance(quant_up, (int, float)) else "N/A"
+        lines.extend(
+            [
+                "## 预测模块审计摘要",
+                "",
+                f"- 目标交易日：{forecast.get('target_date') or 'N/A'}",
+                f"- 量化模型：{forecast.get('quant_model') or 'N/A'}",
+                f"- 量化上涨概率：{quant_text}",
+                f"- 最终方向 / 置信度：{forecast.get('direction') or 'N/A'} / {forecast.get('confidence') or 'N/A'}",
+                f"- 最终概率规则：{forecast.get('probability_note') or 'N/A'}",
+                "",
+            ]
+        )
     continuity_issues = list(audit.get("price_continuity_issues") or [])
     if continuity_issues:
         lines.extend(
@@ -5271,6 +5500,71 @@ def _formal_summary_text(brent_summary: dict[str, str], movement_review: dict[st
     return first_sentence + second_sentence + "。"
 
 
+def _price_layer_markdown_lines(payload: Mapping[str, object]) -> list[str]:
+    lines = ["## 今日 Brent 价格预测", ""]
+    if payload.get("status") != "success":
+        return [
+            *lines,
+            "- Price Layer 暂不可用，原日报其他部分不受影响。",
+            f"- 原因：{payload.get('failure_reason') or '缺少可验证的模型或价格数据。'}",
+            "- 数据边界：仅使用历史价格数据，不使用任何新闻或非价格输入。",
+            "",
+        ]
+    return [
+        *lines,
+        f"- 预测日期：{payload.get('target_date') or 'N/A'}",
+        f"- 当前 Brent 收盘价：{float(payload['current_close']):.2f} 美元/桶",
+        f"- 选用模型：{payload.get('model_display_name') or payload.get('model_name') or 'N/A'}",
+        f"- 预测价格：{float(payload['predicted_price']):.2f} 美元/桶",
+        f"- 预测涨跌幅：{float(payload['predicted_return']):+.2%}",
+        f"- 预测方向：{payload.get('predicted_direction') or 'N/A'}",
+        f"- 历史 Direction Accuracy：{float(payload['direction_accuracy']):.2%}",
+        f"- 历史 Balanced Accuracy：{float(payload['balanced_accuracy']):.2%}",
+        f"- 历史 MAE / RMSE：{float(payload['mae']):.4f} / {float(payload['rmse']):.4f}",
+        f"- 历史 OOS 样本：{int(payload.get('oos_samples') or 0)}",
+        "- 数据边界：仅使用历史价格数据，不使用任何新闻或非价格输入。",
+        "",
+        f"> {payload.get('summary') or 'Price Layer 暂无可用总结。'}",
+        "",
+    ]
+
+
+def _price_layer_html(payload: Mapping[str, object]) -> str:
+    if payload.get("status") != "success":
+        reason = html.escape(str(payload.get("failure_reason") or "缺少可验证的模型或价格数据。"))
+        return (
+            '<section class="price-layer-card" aria-label="今日 Brent 价格预测">'
+            '<span class="price-layer-kicker">PRICE LAYER</span><h2>今日 Brent 价格预测</h2>'
+            '<p>Price Layer 暂不可用，原日报其他部分不受影响。</p>'
+            f'<p class="price-layer-note">原因：{reason}</p>'
+            '<p class="price-layer-note">仅使用历史价格数据，不使用任何新闻或非价格输入。</p>'
+            '</section>'
+        )
+    metrics = (
+        ("预测日期", str(payload.get("target_date") or "N/A")),
+        ("当前收盘价", f"{float(payload['current_close']):.2f} 美元/桶"),
+        ("选用模型", str(payload.get("model_display_name") or payload.get("model_name") or "N/A")),
+        ("预测价格", f"{float(payload['predicted_price']):.2f} 美元/桶"),
+        ("预测涨跌幅", f"{float(payload['predicted_return']):+.2%}"),
+        ("预测方向", str(payload.get("predicted_direction") or "N/A")),
+        ("Direction Accuracy", f"{float(payload['direction_accuracy']):.2%}"),
+        ("Balanced Accuracy", f"{float(payload['balanced_accuracy']):.2%}"),
+    )
+    cards = "".join(
+        '<div class="price-layer-metric">'
+        f'<span>{html.escape(label)}</span><strong>{html.escape(value)}</strong></div>'
+        for label, value in metrics
+    )
+    return (
+        '<section class="price-layer-card" aria-label="今日 Brent 价格预测">'
+        '<span class="price-layer-kicker">PRICE LAYER</span><h2>今日 Brent 价格预测</h2>'
+        f'<div class="price-layer-grid">{cards}</div>'
+        f'<p class="price-layer-summary">{html.escape(str(payload.get("summary") or ""))}</p>'
+        '<p class="price-layer-note">仅使用历史价格数据，不使用任何新闻或非价格输入。</p>'
+        '</section>'
+    )
+
+
 def build_markdown_report(
     store: TrackerStore,
     brent: BrentConfig,
@@ -5283,26 +5577,69 @@ def build_markdown_report(
     external_update: dict[str, object] | None = None,
     trump_update: dict[str, object] | None = None,
     external_cache_dir: Path = Path("data/external_updates"),
+    window_start_utc: datetime | None = None,
+    window_end_utc: datetime | None = None,
+    news_window_start_utc: datetime | None = None,
+    news_window_end_utc: datetime | None = None,
+    output_stem: str | None = None,
+    forecast: dict[str, object] | None = None,
+    read_only_source: bool = False,
+    frozen_snapshot: bool = False,
 ) -> ReportBuildResult:
-    day_start, day_end, day_label = beijing_day_bounds(day, timezone_name)
+    if (window_start_utc is None) != (window_end_utc is None):
+        raise ValueError("自定义统计窗口必须同时提供开始和结束时间。")
+    if window_start_utc is not None and window_end_utc is not None:
+        day_start = ensure_utc(window_start_utc)
+        day_end = ensure_utc(window_end_utc)
+        if day_end <= day_start:
+            raise ValueError("统计窗口结束时间必须晚于开始时间。")
+        start_token = to_beijing(day_start, timezone_name).strftime("%Y%m%d")
+        end_token = (to_beijing(day_end, timezone_name) - timedelta(seconds=1)).strftime("%Y%m%d")
+        day_label = f"{start_token}_{end_token}"
+    else:
+        day_start, day_end, day_label = beijing_day_bounds(day, timezone_name)
+    if (news_window_start_utc is None) != (news_window_end_utc is None):
+        raise ValueError("自定义新闻窗口必须同时提供开始和结束时间。")
+    news_start = ensure_utc(news_window_start_utc or day_start)
+    news_end = ensure_utc(news_window_end_utc or day_end)
+    if news_end <= news_start or news_start < day_start or news_end > day_end:
+        raise ValueError("新闻窗口必须位于价格统计窗口内且结束时间晚于开始时间。")
     if external_update is None:
         external_update = fetch_latest_isw_update(
-            day_end,
+            news_end,
             cache_dir=external_cache_dir,
             timezone_name=timezone_name,
         )
     if trump_update is None:
         trump_update = fetch_trump_statements(
-            day_start,
-            day_end,
+            news_start,
+            news_end,
             cache_dir=external_cache_dir,
             timezone_name=timezone_name,
         )
-    store.refresh_multi_event_groups(day_start, day_end)
-    audit = _build_window_audit(store, brent, day_start, day_end, timezone_name)
-    watch_rows = store.unpriced_watch_rows(day_start, day_end)
-    all_reaction_rows = store.reaction_rows_between(day_start, day_end)
-    movement_review = _build_price_movement_review(store, brent, day_start, day_end, timezone_name)
+    if not read_only_source:
+        store.refresh_multi_event_groups(news_start, news_end)
+    audit_builder = _build_frozen_snapshot_audit if frozen_snapshot else _build_window_audit
+    audit = audit_builder(
+        store,
+        brent,
+        day_start,
+        day_end,
+        timezone_name,
+        news_start_utc=news_start,
+        news_end_utc=news_end,
+    )
+    watch_rows = store.unpriced_watch_rows(news_start, news_end)
+    all_reaction_rows = store.reaction_rows_between(news_start, news_end)
+    movement_review = _build_price_movement_review(
+        store,
+        brent,
+        day_start,
+        day_end,
+        timezone_name,
+        news_start_utc=news_start,
+        news_end_utc=news_end,
+    )
     movement_review = _quarantine_continuity_movements(movement_review, audit)
     movement_review = _degrade_movement_review_for_incomplete_data(movement_review, audit)
     selected_raw_ids = {str(item) for item in (movement_review.get("selected_raw_ids") or set())}
@@ -5342,13 +5679,36 @@ def build_markdown_report(
                 selected_order.append(raw_id)
     rows = [reaction_by_id[raw_id] for raw_id in selected_order if raw_id in reaction_by_id]
     brent_summary = brent_day_summary(store, brent, day_start, day_end)
+    price_layer: dict[str, object] | None = None
+    if forecast is None and not frozen_snapshot:
+        from .price_layer import build_daily_price_forecast_safe
+
+        price_layer = build_daily_price_forecast_safe(
+            store,
+            brent,
+            cutoff_utc=day_end,
+            timezone_name=timezone_name,
+        )
     output_dir.mkdir(parents=True, exist_ok=True)
-    final_status, status_summary = classify_report_status(audit, source_checks)
+    if frozen_snapshot:
+        final_status = "FORMAL"
+        status_summary = {
+            "script_execution_status": "成功",
+            "news_update_status": "周五快照",
+            "price_update_status": "周五快照",
+            "data_integrity_status": str(audit.get("data_integrity") or "不完整"),
+            "formal_report_availability": _availability_label(final_status),
+            "report_status": final_status,
+            "manual_rerun_required": "否",
+        }
+    else:
+        final_status, status_summary = classify_report_status(audit, source_checks)
     if runtime_summary:
         status_summary = {**status_summary, **runtime_summary}
     status_summary.setdefault("report_status", final_status)
     suffix = "" if final_status == "FORMAL" else f"_{final_status}"
-    path = output_dir / f"Jin10_Brent_Rolling_Reaction_{day_label}{suffix}.md"
+    base_stem = output_stem or f"Jin10_Brent_Rolling_Reaction_{day_label}"
+    path = output_dir / f"{base_stem}{suffix}.md"
     audit_path = audit_markdown_path_for(path)
     # Keep the historical _FAILED audit filename for a partial report, but make
     # the document's status and availability match the actual report state.
@@ -5361,6 +5721,7 @@ def build_markdown_report(
     }
     start_local = to_beijing(day_start, timezone_name)
     end_local = to_beijing(day_end, timezone_name)
+    window_copy = _report_window_copy(day_start, day_end)
     chart_path = path.with_name(f"{path.stem}_brent_24h.svg")
     chart_artifact = render_brent_24h_svg(
         chart_candles,
@@ -5371,7 +5732,13 @@ def build_markdown_report(
         _source_label(brent),
         unmatched_movements,
     )
-    title_label = end_local.strftime("%Y%m%d 08:00")
+    title_label = (
+        f"{forecast.get('analysis_start_date')}—{forecast.get('analysis_end_date')}"
+        if forecast and forecast.get("analysis_start_date") and forecast.get("analysis_end_date")
+        else f"{start_local.strftime('%Y-%m-%d')}—{(end_local - timedelta(seconds=1)).strftime('%Y-%m-%d')}"
+        if forecast
+        else end_local.strftime("%Y%m%d 08:00")
+    )
     warning_banner = None
     if final_status != "FORMAL":
         warning_banner = _top_level_warning(
@@ -5391,17 +5758,109 @@ def build_markdown_report(
         final_status,
         audit,
     )
+    if top_summary_items:
+        performance_window_label = (
+            str(forecast.get("performance_window_label") or "两日区间涨跌幅")
+            if forecast
+            else window_copy["performance_label"]
+        )
+        top_summary_items[0] = top_summary_items[0].replace("24小时涨跌幅", performance_window_label)
+    summary_heading = "今日总结" if forecast else "今日重点（Executive Summary）"
     lines = [
         f"# {_report_title(final_status)}（{title_label}）",
         "",
-        "## 今日重点（Executive Summary）",
+        f"## {summary_heading}",
         "",
         *(f"- {item}" for item in top_summary_items),
         "",
-        f"统计窗口：{start_local.strftime('%Y-%m-%d %H:%M')} 至 {end_local.strftime('%Y-%m-%d %H:%M')}（Asia/Shanghai）",
-        f"数据来源：金十数据快讯｜{_source_label(brent)}｜金十数据特朗普专栏｜ISW Iran Update（仅用于后续监测）",
-        "",
     ]
+    if price_layer is not None:
+        lines.extend(_price_layer_markdown_lines(price_layer))
+    if forecast:
+        quant_up = forecast.get("quant_up_probability")
+        quant_line = (
+            f"上涨 {float(quant_up):.1%} / 下跌 {1.0 - float(quant_up):.1%}"
+            if isinstance(quant_up, (int, float))
+            else "数据不足"
+        )
+        final_up = forecast.get("final_up_probability")
+        final_line = (
+            f"上涨 {float(final_up):.1%} / 下跌 {1.0 - float(final_up):.1%}"
+            if isinstance(final_up, (int, float))
+            else f"{forecast.get('direction') or '中性'} / {forecast.get('confidence') or 'LOW'}"
+        )
+        lines.extend(
+            [
+                f"## {forecast.get('target_date') or '下一交易日'} Brent 预测",
+                "",
+                f"- 方向：{forecast.get('direction') or '中性'}",
+                f"- 量化判断：{quant_line}",
+                f"- 新闻判断：{forecast.get('news_direction') or '中性'}",
+                f"- 最终预测：{final_line}",
+                f"- 概率说明：{forecast.get('probability_note') or 'N/A'}",
+                "",
+                "### 量化依据",
+                "",
+                *(f"- {item}" for item in list(forecast.get("quant_reasons") or [])[:3]),
+                "",
+                "### 新闻依据",
+                "",
+                *(f"- {item}" for item in list(forecast.get("news_reasons") or [])[:3]),
+                "",
+                "### 已定价事件",
+                "",
+                *(f"- {item}" for item in list(forecast.get("priced_events") or [])[:3]),
+                "",
+                f"### {forecast.get('risk_heading') or '周末风险'}",
+                "",
+                *(f"- {item}" for item in list(forecast.get("weekend_risks") or [])[:3]),
+                "",
+            ]
+        )
+        model_a = dict(forecast.get("model_a") or {})
+
+        def metric_value(model: Mapping[str, object], key: str) -> str:
+            value = dict(model.get("metrics") or {}).get(key)
+            return f"{float(value):.3f}" if isinstance(value, (int, float)) else "N/A"
+
+        def markdown_model_row(label: str, model: Mapping[str, object], fallback_name: str = "") -> str:
+            name = str(model.get("model_name") or fallback_name or "N/A")
+            reliability = str(model.get("reliability") or "")
+            suffix = f"；{reliability}" if reliability else ""
+            return (
+                f"| {label}（{name}{suffix}） | {model.get('test_samples') or 0} | "
+                f"{metric_value(model, 'accuracy')} | {metric_value(model, 'balanced_accuracy')} | "
+                f"{metric_value(model, 'auc')} | {metric_value(model, 'brier_score')} | "
+                f"{metric_value(model, 'f1')} | {metric_value(model, 'predicted_up_rate')} |"
+            )
+
+        lines.extend(
+            [
+                "### 时间顺序回测",
+                "",
+                "| 模型 | 样本 | Accuracy | Balanced Accuracy | AUC | Brier | F1 | Predicted Up Rate |",
+                "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+                markdown_model_row("Model A 价格", model_a, str(forecast.get("quant_model") or "N/A")),
+                *(
+                    [markdown_model_row("Model A 价格（B/C同窗口）", dict(forecast.get("model_a_overlap") or {}))]
+                    if dict(forecast.get("model_a_overlap") or {}).get("metrics")
+                    else []
+                ),
+                markdown_model_row("Model B 新闻", dict(forecast.get("model_b") or {})),
+                markdown_model_row("Model C 价格+新闻", dict(forecast.get("model_c") or {})),
+                f"- 新闻短历史说明：{forecast.get('backtest_note') or 'N/A'}",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            f"统计窗口：{start_local.strftime('%Y-%m-%d %H:%M')} 至 {end_local.strftime('%Y-%m-%d %H:%M')}（Asia/Shanghai）",
+            f"新闻范围：{to_beijing(news_start, timezone_name).strftime('%Y-%m-%d %H:%M')} 至 {to_beijing(news_end, timezone_name).strftime('%Y-%m-%d %H:%M')}"
+            f"（{forecast.get('news_scope_note') if forecast and forecast.get('news_scope_note') else window_copy['news_scope_note']}）",
+            f"数据来源：金十数据快讯｜{_source_label(brent)}｜金十数据特朗普专栏｜ISW Iran Update（仅用于后续监测）",
+            "",
+        ]
+    )
     if warning_banner:
         lines.extend([f"> {warning_banner}", ""])
     continuity_issues = list(audit.get("price_continuity_issues") or [])
@@ -5417,7 +5876,7 @@ def build_markdown_report(
         [
             "## 本窗口Brent表现",
             "",
-            "| 最新价 | 24小时涨跌幅 | 日内最高价 | 日内最低价 |",
+            f"| 最新价 | {forecast.get('performance_window_label') or '两日区间涨跌幅' if forecast else window_copy['performance_label']} | 区间最高价 | 区间最低价 |",
             "| ---: | ---: | ---: | ---: |",
             f"| {brent_summary['latest']} | {brent_summary['pct']} | {brent_summary['high']} | {brent_summary['low']} |",
             "",
@@ -5433,7 +5892,7 @@ def build_markdown_report(
     if chart_artifact:
         lines.extend(
             [
-                f"![Brent 24小时30分钟K线与关键新闻事件]({chart_artifact.path.name})",
+                f"![{window_copy['chart_label']}]({chart_artifact.path.name})",
                 "",
             ]
         )
@@ -5474,6 +5933,7 @@ def build_markdown_report(
         homepage_event_groups=homepage_presentation.event_groups,
         homepage_display_summary=homepage_presentation.display_summary,
         homepage_representations=homepage_presentation.homepage_representations,
+        forecast=forecast,
     )
     audit_path.write_text("\n".join(audit_lines), encoding="utf-8")
     build_html_report(audit_path, output_dir)
@@ -5489,6 +5949,8 @@ def build_markdown_report(
         display_summary=homepage_presentation.display_summary,
         event_groups=homepage_presentation.event_groups,
         homepage_representations=homepage_presentation.homepage_representations,
+        forecast=forecast,
+        price_layer=price_layer,
     )
     return ReportBuildResult(markdown_path=path, presentation=presentation)
 
@@ -5588,7 +6050,7 @@ def _formal_section(lines: list[str], heading: str, stop_headings: tuple[str, ..
         return []
     end = len(lines)
     for index in range(start, len(lines)):
-        if lines[index] in {f"## {item}" for item in stop_headings}:
+        if lines[index].startswith("## "):
             end = index
             break
     return lines[start:end]
@@ -5718,14 +6180,23 @@ def _parse_formal_events(
 
 
 def _formal_metric_values(lines: list[str]) -> list[tuple[str, str]]:
-    expected = ["最新价", "24小时涨跌幅", "日内最高价", "日内最低价"]
+    display_labels = ["最新价", "24小时涨跌幅", "日内最高价", "日内最低价"]
     for index, line in enumerate(lines[:-2]):
-        if _markdown_table_cells(line) != expected or not _is_markdown_table_separator(lines[index + 1]):
+        headers = _markdown_table_cells(line)
+        accepted = (
+            len(headers) == 4
+            and headers[0] == "最新价"
+            and headers[1].endswith("涨跌幅")
+            and headers[2] in {"日内最高价", "区间最高价"}
+            and headers[3] in {"日内最低价", "区间最低价"}
+        )
+        if not accepted or not _is_markdown_table_separator(lines[index + 1]):
             continue
         values = _markdown_table_cells(lines[index + 2])
-        if len(values) == len(expected):
-            return list(zip(expected, values))
-    return [(label, "N/A") for label in expected]
+        if len(values) == len(display_labels):
+            normalized_labels = [display_labels[0], headers[1], display_labels[2], display_labels[3]]
+            return list(zip(normalized_labels, values))
+    return [(label, "N/A") for label in display_labels]
 
 
 def _first_external_update(text: str) -> tuple[str, str]:
@@ -6026,7 +6497,15 @@ def _parse_formal_dashboard(
     explained = _parse_formal_events(explained_lines, window_start, "explained")
     unexplained = _parse_formal_events(unexplained_lines, window_start, "unexplained")
     metrics = _formal_metric_values(lines)
-    pct = dict(metrics).get("24小时涨跌幅", "N/A")
+    metric_map = dict(metrics)
+    pct = next(
+        (
+            value
+            for label, value in metrics
+            if label == "24小时涨跌幅" or label.endswith(("小时涨跌幅", "区间涨跌幅"))
+        ),
+        "N/A",
+    )
     if pct.startswith("+"):
         overall = f"Brent本窗口整体上涨 {pct}。"
     elif pct.startswith("-"):
@@ -6036,7 +6515,7 @@ def _parse_formal_dashboard(
     logic_match = re.search(r"可归因线索主要集中在([^，。；]+)", text)
     logic = logic_match.group(1).strip() if logic_match else "暂无足够明确的单一交易主线"
     title = next((line[2:] for line in lines if line.startswith("# ")), "Brent滚动日报")
-    meta = [line for line in lines if line.startswith(("统计窗口：", "数据来源："))][:2]
+    meta = [line for line in lines if line.startswith(("统计窗口：", "新闻范围：", "数据来源："))][:3]
     preamble_end = next(
         (
             index
@@ -6074,9 +6553,10 @@ def _parse_formal_dashboard(
         "数据覆盖范围",
         ("本窗口Brent表现",),
     )
+    markdown_summary_heading = "今日总结" if "## 今日总结" in lines else "今日重点（Executive Summary）"
     markdown_top_summary_items = _formal_bullet_items(
         lines,
-        "今日重点（Executive Summary）",
+        markdown_summary_heading,
         (
             "标的信息",
             "数据覆盖范围",
@@ -6107,12 +6587,15 @@ def _parse_formal_dashboard(
     ]
     return {
         "title": title,
+        "summary_heading": markdown_summary_heading,
         "meta": meta,
         "top_summary_items": (
             list(presentation.top_summary_items)
             if presentation and presentation.top_summary_items
             else markdown_top_summary_items
         ),
+        "forecast": dict(presentation.forecast or {}) if presentation else {},
+        "price_layer": dict(presentation.price_layer or {}) if presentation else {},
         "trump_items": (
             list(presentation.trump_items)
             if presentation and presentation.trump_items
@@ -6375,10 +6858,97 @@ def _embedded_chart_html(
 
 def _formal_dashboard_body(markdown_path: Path, dashboard: dict[str, object]) -> list[str]:
     lines = [f'<main class="report-shell"><h1>{_inline_markdown_html(str(dashboard["title"]))}</h1>']
-    lines.append('<section class="executive-summary" aria-label="今日重点"><h2>今日重点</h2><ul>')
+    summary_heading = "今日总结" if dashboard.get("forecast") else "今日重点"
+    lines.append(
+        f'<section class="executive-summary" aria-label="{summary_heading}"><h2>{summary_heading}</h2><ul>'
+    )
     for item in dashboard.get("top_summary_items") or []:
         lines.append(f'<li data-summary-item="true">{_inline_markdown_html(str(item))}</li>')
     lines.append("</ul></section>")
+    price_layer = dashboard.get("price_layer")
+    if isinstance(price_layer, Mapping) and price_layer:
+        lines.append(_price_layer_html(price_layer))
+    forecast = dashboard.get("forecast")
+    if isinstance(forecast, Mapping) and forecast:
+        target_date = html.escape(str(forecast.get("target_date") or "下一交易日"))
+        direction = html.escape(str(forecast.get("direction") or "中性"))
+        confidence = html.escape(str(forecast.get("confidence") or "LOW"))
+        quant_up = forecast.get("quant_up_probability")
+        quant_text = "数据不足"
+        if isinstance(quant_up, (int, float)):
+            quant_text = f"上涨 {float(quant_up):.1%} / 下跌 {1.0 - float(quant_up):.1%}"
+        final_up = forecast.get("final_up_probability")
+        final_text = (
+            f"上涨 {float(final_up):.1%} / 下跌 {1.0 - float(final_up):.1%}"
+            if isinstance(final_up, (int, float))
+            else "不展示未经回测支持的最终概率"
+        )
+        lines.append(f'<section class="forecast-card" aria-label="{target_date} Brent 预测">')
+        forecast_kicker = html.escape(str(forecast.get("forecast_kicker") or "NEXT SESSION"))
+        lines.append(
+            f'<div class="forecast-heading"><div><span class="forecast-kicker">{forecast_kicker}</span>'
+            f'<h2>{target_date} Brent 预测</h2></div><span class="confidence-badge">{confidence}</span></div>'
+        )
+        lines.append('<div class="forecast-grid">')
+        for label, value in (
+            ("方向", direction),
+            ("量化判断", quant_text),
+            ("新闻判断", str(forecast.get("news_direction") or "中性")),
+            ("最终预测", final_text),
+        ):
+            lines.append(
+                f'<div class="forecast-metric"><span>{html.escape(label)}</span>'
+                f'<strong>{html.escape(value)}</strong></div>'
+            )
+        lines.append('</div>')
+        note = str(forecast.get("probability_note") or "")
+        if note:
+            lines.append(f'<p class="forecast-note">{html.escape(note)}</p>')
+        lines.append('<div class="forecast-evidence-grid">')
+        risk_heading = str(forecast.get("risk_heading") or "周末风险")
+        for heading, key in (
+            ("量化依据", "quant_reasons"),
+            ("新闻依据", "news_reasons"),
+            ("已定价事件", "priced_events"),
+            (risk_heading, "weekend_risks"),
+        ):
+            lines.append(f'<div><h3>{heading}</h3><ul>')
+            items = list(forecast.get(key) or [])[:3]
+            lines.extend(f'<li>{html.escape(str(item))}</li>' for item in items)
+            if not items:
+                lines.append('<li>数据不足，暂无可靠条目。</li>')
+            lines.append('</ul></div>')
+        lines.append('</div>')
+        model_a = dict(forecast.get("model_a") or {})
+
+        def html_metric(model: Mapping[str, object], key: str) -> str:
+            value = dict(model.get("metrics") or {}).get(key)
+            return f"{float(value):.3f}" if isinstance(value, (int, float)) else "N/A"
+
+        def model_row(label: str, model: Mapping[str, object], fallback_name: str = "") -> str:
+            name = str(model.get("model_name") or fallback_name or "N/A")
+            reliability = str(model.get("reliability") or "")
+            suffix = f"；{reliability}" if reliability else ""
+            return (
+                f"<tr><td>{html.escape(label)}（{html.escape(name + suffix)}）</td>"
+                f"<td>{int(model.get('test_samples') or 0)}</td>"
+                f"<td>{html_metric(model, 'accuracy')}</td>"
+                f"<td>{html_metric(model, 'balanced_accuracy')}</td>"
+                f"<td>{html_metric(model, 'auc')}</td>"
+                f"<td>{html_metric(model, 'brier_score')}</td>"
+                f"<td>{html_metric(model, 'f1')}</td>"
+                f"<td>{html_metric(model, 'predicted_up_rate')}</td></tr>"
+            )
+
+        lines.append('<div class="forecast-backtest"><h3>时间顺序回测</h3>')
+        lines.append('<div class="table-wrap"><table><thead><tr><th>模型</th><th>样本</th><th>Accuracy</th><th>Balanced Accuracy</th><th>AUC</th><th>Brier</th><th>F1</th><th>Predicted Up Rate</th></tr></thead><tbody>')
+        lines.append(model_row("Model A 价格", model_a, str(forecast.get("quant_model") or "N/A")))
+        model_a_overlap = dict(forecast.get("model_a_overlap") or {})
+        if model_a_overlap.get("metrics"):
+            lines.append(model_row("Model A 价格（B/C同窗口）", model_a_overlap))
+        lines.append(model_row("Model B 新闻", dict(forecast.get("model_b") or {})))
+        lines.append(model_row("Model C 价格+新闻", dict(forecast.get("model_c") or {})))
+        lines.append('</tbody></table></div></div></section>')
     meta = list(dashboard.get("meta") or [])
     if meta:
         lines.append('<div class="report-meta">')
@@ -6398,7 +6968,7 @@ def _formal_dashboard_body(markdown_path: Path, dashboard: dict[str, object]) ->
     lines.append('<div class="metric-grid" aria-label="Brent关键指标">')
     for label, value in list(dashboard.get("metrics") or []):
         movement_class = ""
-        if label == "24小时涨跌幅":
+        if label == "24小时涨跌幅" or str(label).endswith(("小时涨跌幅", "区间涨跌幅")):
             movement_class = " metric-up" if str(value).startswith("+") else " metric-down" if str(value).startswith("-") else ""
         lines.append(
             '<div class="metric-card">'
@@ -6418,6 +6988,46 @@ def _formal_dashboard_body(markdown_path: Path, dashboard: dict[str, object]) ->
         '<p class="news-panel-empty">点击上方K线图中的蓝色新闻时间点，查看该时段的相关新闻与市场解读。</p>'
         "</div>"
     )
+    important_news = list(forecast.get("important_news") or []) if isinstance(forecast, Mapping) else []
+    if important_news:
+        important_news_heading = html.escape(
+            str(forecast.get("important_news_heading") or "两日重要原油新闻与价格状态")
+        )
+        reaction_end_label = str(forecast.get("reaction_end_label") or "截至周五收盘")
+        lines.append(f'<section class="important-news-section"><h2>{important_news_heading}</h2>')
+        lines.append('<p class="important-news-intro">仅列入能建立明确原油传导链的事件；同一事件重复快讯已经合并。</p>')
+        for item in important_news:
+            returns = dict(item.get("reaction_returns") or {})
+            direction_label = {"bullish": "利多", "bearish": "利空", "neutral": "中性"}.get(
+                str(item.get("direction") or "neutral"), "中性"
+            )
+            published = html.escape(str(item.get("published_at") or "N/A"))
+            title = html.escape(str(item.get("title") or "未命名事件"))
+            pricing = html.escape(str(item.get("pricing_status") or "UNKNOWN"))
+            lines.append('<article class="important-news-item" data-important-news="true">')
+            lines.append(
+                f'<div class="important-news-meta"><time>{published}</time>'
+                f'<span>{html.escape(direction_label)} / {html.escape(str(item.get("strength") or "weak"))}</span>'
+                f'<span>{html.escape(str(item.get("category") or "Other"))}</span><span>定价：{pricing}</span></div>'
+            )
+            lines.append(f'<h3>{title}</h3>')
+            lines.append(f'<p><strong>传导：</strong>{html.escape(str(item.get("transmission_chain") or "N/A"))}</p>')
+            lines.append(f'<p><strong>定价判断：</strong>{html.escape(str(item.get("pricing_explanation") or "N/A"))}</p>')
+            lines.append(
+                '<p class="important-news-reaction"><strong>价格反应：</strong>'
+                + " ｜ ".join(
+                    f"{label} {_fmt_pct(returns.get(key))}"
+                    for label, key in (("5分钟", "5m"), ("30分钟", "30m"), ("2小时", "2h"), (reaction_end_label, "end"))
+                )
+                + "</p>"
+            )
+            url = str(item.get("url") or "")
+            if url.startswith(("https://", "http://")):
+                lines.append(
+                    f'<a href="{html.escape(url, quote=True)}" target="_blank" rel="noopener noreferrer">查看金十原文 ↗</a>'
+                )
+            lines.append('</article>')
+        lines.append('</section>')
     lines.append('<section id="trump-card" class="trump-card"><h2>特朗普相关言论</h2>')
     for item in list(dashboard.get("trump_items") or []):
         published_at_bj = html.escape(str(item.get("published_at_bj") or ""))
@@ -6549,6 +7159,10 @@ def build_html_report(
         "h2{margin:0;color:#152a46;font-size:19px;line-height:1.35}.section-title{margin:30px 0 12px}p{margin:8px 0;color:#334155}blockquote{margin:16px 0;padding:10px 14px;border-left:3px solid #94a3b8;background:var(--soft);color:#475569}",
         "a{color:#165dcc;text-underline-offset:3px}ul{margin:8px 0;padding-left:22px}li{margin:8px 0}",
         ".executive-summary{margin:22px 0 16px;padding:20px 24px;border:1px solid #cbdcf1;border-left:4px solid var(--news);border-radius:14px;background:#f8fbff}.executive-summary h2{margin-bottom:10px}.executive-summary ul{margin-bottom:0}.executive-summary li{color:#273a55}",
+        ".forecast-card{margin:18px 0 22px;padding:24px;border:1px solid #7aa7e6;border-radius:18px;background:linear-gradient(145deg,#eef6ff 0%,#f8fbff 56%,#fff 100%);box-shadow:0 14px 30px rgba(37,99,235,.10)}.forecast-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px}.forecast-heading h2{font-size:23px;color:#123d73}.forecast-kicker{display:block;margin-bottom:4px;color:#2563eb;font-size:11px;font-weight:800;letter-spacing:.14em}.confidence-badge{display:inline-flex;padding:6px 11px;border-radius:999px;background:#173f7a;color:#fff;font-size:12px;font-weight:800}.forecast-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.forecast-metric{padding:13px 14px;border:1px solid #c5daf5;border-radius:12px;background:rgba(255,255,255,.84)}.forecast-metric span{display:block;margin-bottom:5px;color:#5a7090;font-size:12px}.forecast-metric strong{display:block;color:#143960;font-size:15px}.forecast-note{margin:12px 0 0;color:#496581;font-size:13px}.forecast-evidence-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:16px}.forecast-evidence-grid>div{padding:13px 14px;border-top:1px solid #c9dcf4}.forecast-evidence-grid h3{margin:0 0 5px;color:#234d7d;font-size:14px}.forecast-evidence-grid ul{margin:0}.forecast-evidence-grid li{color:#405773;font-size:13px}",
+        ".important-news-section{margin:22px 0;padding:22px;border:1px solid var(--line);border-radius:16px;background:#fbfcfe}.important-news-section>h2{margin-bottom:5px}.important-news-intro{margin:0 0 14px;color:#66768b;font-size:13px}.important-news-item{padding:15px 0;border-top:1px solid #dfe7f0}.important-news-item:first-of-type{border-top:0}.important-news-item h3{margin:8px 0 7px;font-size:16px;color:#183b62}.important-news-item p{margin:5px 0;color:#40536b;font-size:13px}.important-news-item>a{display:inline-block;margin-top:6px;font-size:13px}.important-news-meta{display:flex;flex-wrap:wrap;gap:7px}.important-news-meta time,.important-news-meta span{padding:3px 7px;border-radius:999px;background:#edf3fa;color:#47627f;font-size:11px}.important-news-reaction{font-variant-numeric:tabular-nums}",
+        ".forecast-backtest{margin-top:18px;padding-top:14px;border-top:1px solid #b9d1ef}.forecast-backtest h3{margin:0 0 8px;color:#234d7d;font-size:15px}.forecast-backtest .table-wrap{margin:0;background:rgba(255,255,255,.86)}.forecast-backtest table{font-size:12px}",
+        ".price-layer-card{margin:24px 0 4px;padding:22px;border:1px solid #9fc3e8;border-radius:16px;background:#f7fbff}.price-layer-kicker{display:block;margin-bottom:4px;color:#2563eb;font-size:11px;font-weight:800;letter-spacing:.14em}.price-layer-card h2{margin-bottom:14px;color:#123d73}.price-layer-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}.price-layer-metric{padding:11px 12px;border:1px solid #d3e3f4;border-radius:10px;background:#fff}.price-layer-metric span{display:block;margin-bottom:4px;color:#60758d;font-size:11px}.price-layer-metric strong{display:block;color:#183b62;font-size:14px}.price-layer-summary{margin:14px 0 6px;color:#294d73;font-weight:650}.price-layer-note{margin:6px 0 0;color:#66768b;font-size:12px}",
         ".context-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:18px 0 24px}.context-card{padding:16px 18px;border:1px solid var(--line);border-radius:14px;background:var(--soft)}.context-card h2{margin-bottom:8px}.context-card ul{margin-bottom:0}.context-card li{color:#475569;font-size:13px}",
         ".market-lede{margin:22px 0 26px;padding:16px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.market-lede h2{margin:0 0 8px}.market-lede p{margin:4px 0;color:#2c3b52;font-size:15px}",
         ".metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:12px 0 22px}.metric-card{padding:18px 18px 16px;border:1px solid var(--line);border-radius:14px;background:#fff}.metric-label{display:block;margin-bottom:7px;color:var(--muted);font-size:13px}.metric-value{display:block;font:700 26px/1.15 'SFMono-Regular',Consolas,monospace;color:#152a46}.metric-value.metric-up{color:var(--up)}.metric-value.metric-down{color:var(--down)}",
@@ -6558,7 +7172,7 @@ def build_html_report(
         ".summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:20px 0 0}.summary-card{padding:20px 22px;border:1px solid var(--line);border-radius:14px;background:#fff}.summary-card h2{margin-bottom:10px}.summary-card ul{margin-bottom:0}.summary-card li{color:#3d4e65}",
         ".audit-link{margin-top:34px;padding-top:22px;border-top:1px solid var(--line)}.audit-link a{display:inline-flex;padding:10px 15px;border:1px solid #b9c8db;border-radius:10px;background:#fff;color:#244b78;font-weight:650;text-decoration:none}.audit-link a:hover{background:#f5f8fc}",
         ".table-wrap{overflow-x:auto;margin:14px 0 26px;border:1px solid var(--line);border-radius:10px}table{width:100%;border-collapse:collapse;font-size:14px;white-space:nowrap}th,td{padding:9px 11px;border-bottom:1px solid #e6ebf1}",
-        "@media(max-width:820px){body{padding:0;background:#fff}.report-shell{padding:26px 16px 30px;border:0;border-radius:0;box-shadow:none}.executive-summary{padding:18px 16px}.context-grid{grid-template-columns:1fr}.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.event-reactions{grid-template-columns:repeat(2,minmax(0,1fr))}.summary-grid{grid-template-columns:1fr}.chart-figure{margin-left:-16px;margin-right:-16px;border-radius:0;padding:0 16px;border-left:0;border-right:0}h1{font-size:25px}.metric-value{font-size:22px}.news-panel{padding:16px 14px}.trump-card,.summary-card{padding:18px 16px}.statement-meta{align-items:flex-start;flex-direction:column}}",
+        "@media(max-width:820px){body{padding:0;background:#fff}.report-shell{padding:26px 16px 30px;border:0;border-radius:0;box-shadow:none}.executive-summary,.forecast-card,.price-layer-card{padding:18px 16px}.forecast-grid,.forecast-evidence-grid,.price-layer-grid{grid-template-columns:1fr}.context-grid{grid-template-columns:1fr}.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.event-reactions{grid-template-columns:repeat(2,minmax(0,1fr))}.summary-grid{grid-template-columns:1fr}.chart-figure{margin-left:-16px;margin-right:-16px;border-radius:0;padding:0 16px;border-left:0;border-right:0}h1{font-size:25px}.metric-value{font-size:22px}.news-panel{padding:16px 14px}.trump-card,.summary-card{padding:18px 16px}.statement-meta{align-items:flex-start;flex-direction:column}}",
         "@media print{body{padding:0;background:#fff}.report-shell{max-width:none;padding:0;border:0;box-shadow:none}.chart-figure svg{min-width:0}.news-panel{display:none}a{color:inherit;text-decoration:none}}",
     ]
     html_lines = [
@@ -6844,11 +7458,18 @@ def build_html_report(
             while index < len(lines) and lines[index].strip().startswith("|"):
                 rows.append(_markdown_table_cells(lines[index]))
                 index += 1
-            if not is_audit and headers == ["最新价", "24小时涨跌幅", "日内最高价", "日内最低价"] and len(rows) == 1:
+            is_price_metric_table = (
+                len(headers) == 4
+                and headers[0] == "最新价"
+                and headers[1].endswith("涨跌幅")
+                and headers[2] in {"日内最高价", "区间最高价"}
+                and headers[3] in {"日内最低价", "区间最低价"}
+            )
+            if not is_audit and is_price_metric_table and len(rows) == 1:
                 html_lines.append('<div class="metric-grid" aria-label="Brent价格情况">')
                 for label, value in zip(headers, rows[0]):
                     movement_class = ""
-                    if label == "24小时涨跌幅":
+                    if label.endswith("涨跌幅"):
                         movement_class = " metric-up" if value.startswith("+") else " metric-down" if value.startswith("-") else ""
                     html_lines.append(
                         '<div class="metric-card">'

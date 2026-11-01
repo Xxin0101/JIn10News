@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -252,7 +253,19 @@ def _article_bullets(page: str) -> list[str]:
 
 def _translate_to_chinese(text: str) -> str:
     url = f"{TRANSLATE_API}?{urllib.parse.urlencode({'client': 'gtx', 'sl': 'en', 'tl': 'zh-CN', 'dt': 't', 'q': text})}"
-    payload = json.loads(_request_text(url, timeout=20))
+    last_error: Exception | None = None
+    for attempt, delay in enumerate((0.0, 1.0, 3.0)):
+        if delay:
+            time.sleep(delay)
+        try:
+            payload = json.loads(_request_text(url, timeout=20))
+            break
+        except urllib.error.HTTPError as exc:
+            last_error = exc
+            if exc.code not in {429, 500, 502, 503, 504} or attempt == 2:
+                raise
+    else:  # pragma: no cover - the retry loop either returns data or raises
+        raise RuntimeError(f"机器翻译失败: {last_error}")
     if not isinstance(payload, list):
         raise ValueError("机器翻译返回格式异常")
     translated = "".join(
@@ -266,7 +279,12 @@ def _translate_to_chinese(text: str) -> str:
 
 
 def _translate_bullets(bullets: list[str]) -> list[str]:
-    return [_translate_to_chinese(item) for item in bullets]
+    translated: list[str] = []
+    for index, item in enumerate(bullets):
+        translated.append(_translate_to_chinese(item))
+        if index < len(bullets) - 1:
+            time.sleep(0.35)
+    return translated
 
 
 def _resolve_isw_short_url(url: str) -> str:
@@ -371,20 +389,54 @@ def _fetch_from_official_bluesky(as_of_utc: datetime) -> dict[str, object]:
         f"{ISW_BLUESKY_API}/app.bsky.feed.getPostThread",
         {"uri": uri, "depth": 10},
     )
+    thread_posts = _walk_thread(thread.get("thread"))
     links: list[str] = []
-    for post in _walk_thread(thread.get("thread")):
+    thread_texts: list[str] = []
+    for post in thread_posts:
         record = post.get("record") or {}
         if isinstance(record, dict):
             links.extend(_record_links(record))
+            thread_texts.append(str(record.get("text") or ""))
     short_url = next((link for link in links if "isw.pub" in link or _valid_isw_article_url(link)), "")
     original_url = _resolve_isw_short_url(short_url) if short_url else ""
     if not original_url:
         raise RuntimeError("ISW官方线程未提供可解析的官网原文链接")
-    page = _request_text(original_url)
-    key_takeaways = _article_key_takeaways(page)
+    page = ""
+    try:
+        page = _request_text(original_url)
+    except Exception:
+        # The ISW site can block automated article requests while its official
+        # Bluesky thread remains publicly available. The numbered thread is an
+        # official first-party fallback, not a third-party summary.
+        pass
+    key_takeaways = _article_key_takeaways(page) if page else []
     if not key_takeaways:
-        raise RuntimeError("ISW官网未解析到Key Takeaways")
-    title = _title_from_page_or_url(page, original_url)
+        key_takeaways = []
+        for text in thread_texts:
+            cleaned = _clean_source_bullet(text)
+            if not cleaned or re.match(r"^Iran Update,?\s", cleaned, flags=re.I):
+                continue
+            key_takeaways.append(cleaned)
+    if not key_takeaways:
+        raise RuntimeError("ISW官网与官方Bluesky线程均未解析到Key Takeaways")
+    thread_title = next(
+        (
+            match.group(1)
+            for text in reversed(thread_texts)
+            for match in [
+                re.search(
+                    r"(Iran Update,\s+[A-Za-z]+\s+\d{1,2},\s+\d{4})",
+                    text,
+                    flags=re.I,
+                )
+            ]
+            if match
+        ),
+        "",
+    )
+    title = _title_from_page_or_url(page, original_url) if page else thread_title
+    if not title:
+        title = _title_from_page_or_url("", original_url)
     published_raw = _extract_meta(page, ("article:published_time", "datePublished", "dateModified"))
     published = parse_iso_utc(published_raw) if published_raw else None
     return {

@@ -68,6 +68,48 @@ def parse_args() -> argparse.Namespace:
         help="忽略该截止时间已有的特朗普专栏失败缓存并重新抓取；成功缓存仍复用。",
     )
 
+    forecast_p = sub.add_parser("forecast-report", help="生成指定交易日期区间日报并预测下一交易日Brent方向。")
+    add_common(forecast_p, max_pages_default=1800, pause_default=0.05)
+    forecast_p.add_argument("--start-date", required=True, help="分析开始交易日，格式YYYY-MM-DD。")
+    forecast_p.add_argument("--end-date", required=True, help="分析结束交易日，格式YYYY-MM-DD。")
+    forecast_p.add_argument("--target-date", required=True, help="预测目标交易日，格式YYYY-MM-DD。")
+
+    same_day_p = sub.add_parser(
+        "same-day-forecast-report",
+        help="复用周五量化快照，结合截止目标日08:00的新闻生成同日方向预测。",
+    )
+    add_common(same_day_p, max_pages_default=1800, pause_default=0.05)
+    same_day_p.add_argument("--start-date", required=True, help="新闻及报告窗口开始日期，格式YYYY-MM-DD。")
+    same_day_p.add_argument("--end-date", required=True, help="窗口结束日期；必须等于目标日期。")
+    same_day_p.add_argument("--target-date", required=True, help="同日预测目标日期，格式YYYY-MM-DD。")
+    same_day_p.add_argument(
+        "--base-snapshot-path",
+        required=True,
+        help="目标周一前周五的已验证预测快照；只复用其Model A结果。",
+    )
+    same_day_p.add_argument(
+        "--retry-failed-isw",
+        action="store_true",
+        help="忽略截止时间已有的ISW失败缓存并重新抓取。",
+    )
+    same_day_p.add_argument(
+        "--retry-failed-trump",
+        action="store_true",
+        help="忽略截止时间已有的特朗普专栏失败缓存并重新抓取。",
+    )
+
+    prepare_forecast_p = sub.add_parser(
+        "prepare-forecast-snapshot",
+        help="仅从已保存计算结果整理严格截止周五的预测快照；不抓取任何数据。",
+    )
+    prepare_forecast_p.add_argument("--source-path", required=True, help="已保存预测计算JSON路径。")
+    prepare_forecast_p.add_argument("--output-dir", default="outputs/tracker", help="周五快照输出目录。")
+    prepare_forecast_p.add_argument("--log-dir", default="logs", help="运行日志目录。")
+    prepare_forecast_p.add_argument("--timezone", default="Asia/Shanghai", help="快照时区。")
+    prepare_forecast_p.add_argument("--start-date", required=True, help="分析开始交易日，格式YYYY-MM-DD。")
+    prepare_forecast_p.add_argument("--end-date", required=True, help="分析结束交易日，格式YYYY-MM-DD。")
+    prepare_forecast_p.add_argument("--target-date", required=True, help="预测目标周一，格式YYYY-MM-DD。")
+
     init_p = sub.add_parser("init-db", help="初始化SQLite数据库。")
     init_p.add_argument("--db-path", default="data/jin10_tracker.sqlite", help="SQLite数据库路径。")
     return parser.parse_args()
@@ -134,6 +176,31 @@ def main() -> int:
             store.close()
         return 0
 
+    if args.command == "prepare-forecast-snapshot":
+        from jin10_market_report.forecast_pipeline import prepare_friday_snapshot
+
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        logger, log_path = setup_logger(Path(args.log_dir), f"tracker_{run_id}")
+        start_day = datetime.strptime(args.start_date, "%Y-%m-%d").date()
+        end_day = datetime.strptime(args.end_date, "%Y-%m-%d").date()
+        target_day = datetime.strptime(args.target_date, "%Y-%m-%d").date()
+        output_stem = (
+            f"Jin10_Brent_Daily_Forecast_{start_day.strftime('%Y%m%d')}_"
+            f"{end_day.strftime('%Y%m%d')}_for_{target_day.strftime('%Y%m%d')}"
+        )
+        destination = Path(args.output_dir) / f"{output_stem}_friday_snapshot.json"
+        result = prepare_friday_snapshot(
+            Path(args.source_path),
+            destination,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            target_date=args.target_date,
+            timezone_name=args.timezone,
+        )
+        logger.info("周五预测快照整理完成: log=%s result=%s", log_path, json.dumps(result, ensure_ascii=False))
+        print(f"周五预测快照已生成: {result['snapshot_path']}")
+        return 0
+
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     logger, log_path = setup_logger(Path(args.log_dir), f"tracker_{run_id}")
     fetch_config, filter_config, brent_config, tracker_config = build_configs(args)
@@ -142,6 +209,46 @@ def main() -> int:
     logger.info("注意: 每5分钟任务仅执行规则化抓取、入库和公式计算，不调用任何AI接口。")
 
     try:
+        if args.command == "forecast-report":
+            from jin10_market_report.forecast_pipeline import run_forecast_report
+
+            result = run_forecast_report(
+                store,
+                fetch_config,
+                filter_config,
+                brent_config,
+                tracker_config,
+                logger,
+                start_date=args.start_date,
+                end_date=args.end_date,
+                target_date=args.target_date,
+            )
+            logger.info("预测日报运行结果: %s", json.dumps(_json_safe(result), ensure_ascii=False))
+            print(f"预测日报已生成: {result['html_path']}")
+            print(f"周五预测快照: {result['forecast_snapshot_path']}")
+            print(f"reused={'true' if result['reused'] else 'false'}")
+            return 0
+
+        if args.command == "same-day-forecast-report":
+            from jin10_market_report.forecast_pipeline import run_same_day_forecast_report
+
+            result = run_same_day_forecast_report(
+                store,
+                brent_config,
+                tracker_config,
+                logger,
+                start_date=args.start_date,
+                end_date=args.end_date,
+                target_date=args.target_date,
+                base_snapshot_path=Path(args.base_snapshot_path),
+                retry_failed_isw=args.retry_failed_isw,
+                retry_failed_trump=args.retry_failed_trump,
+            )
+            logger.info("同日预测日报运行结果: %s", json.dumps(_json_safe(result), ensure_ascii=False))
+            print(f"同日预测日报已生成: {result['html_path']}")
+            print(f"预测结果清单: {result['forecast_result_json_path']}")
+            return 0
+
         if args.command == "report":
             from jin10_market_report.external_update import fetch_latest_isw_update
             from jin10_market_report.trump_update import fetch_trump_statements

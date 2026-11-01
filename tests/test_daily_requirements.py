@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import tempfile
 import unittest
 from datetime import datetime, timedelta
@@ -10,13 +11,17 @@ from urllib.parse import parse_qs, urlparse
 from zoneinfo import ZoneInfo
 
 from jin10_market_report.brent import BRENT_INSTRUMENT_METADATA, BrentConfig, build_yahoo_chart_url
+from jin10_market_report.config import FetchConfig
 from jin10_market_report.eventing import direct_energy_supply_reason, market_bias_for_event
 from jin10_market_report.external_update import (
     _article_key_takeaways,
     _clean_source_bullet,
+    _fetch_from_official_bluesky,
     _title_from_page_or_url,
     fetch_latest_isw_update,
 )
+from jin10_market_report.fetcher import Jin10FetchError, _request_json, fetch_flashes_between
+from jin10_market_report.models import RunStats
 from jin10_market_report.tracking_report import (
     _audit_data_integrity_lines,
     _build_blue_panel_groups,
@@ -37,6 +42,7 @@ from jin10_market_report.tracking_report import (
     classify_report_status,
 )
 from jin10_market_report import tracking_report
+from jin10_market_report.time_utils import parse_iso_utc
 
 
 UTC = ZoneInfo("UTC")
@@ -94,6 +100,69 @@ class _PriceStore:
 
 
 class DailyRequirementTests(unittest.TestCase):
+    def test_historical_jin10_fetch_starts_at_report_end_boundary(self) -> None:
+        """Starting from the live feed must not waste pages newer than the requested report."""
+        requested_params: list[dict[str, object]] = []
+
+        def one_old_page(url, params, config):
+            requested_params.append(dict(params))
+            return {
+                "status": 200,
+                "data": [
+                    {
+                        "id": "older-than-window",
+                        "time": "2026-09-08 07:59:59",
+                        "type": 0,
+                        "data": {"content": "older item"},
+                    }
+                ],
+            }
+
+        stats = RunStats(fetch_started_at=datetime(2026, 9, 10, tzinfo=UTC))
+        with patch(
+            "jin10_market_report.fetcher._request_json_with_retry",
+            side_effect=one_old_page,
+        ):
+            fetch_flashes_between(
+                FetchConfig(timezone="Asia/Shanghai"),
+                stats,
+                datetime(2026, 9, 9, tzinfo=UTC),
+                datetime(2026, 9, 10, tzinfo=UTC),
+            )
+
+        self.assertEqual(requested_params[0].get("max_time"), "2026-09-10 08:00:00")
+
+    def test_jin10_response_body_timeout_uses_existing_network_error_contract(self) -> None:
+        """A timeout while reading a valid HTTP response must reach the configured retry layer."""
+
+        class TimeoutResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def read(self):
+                raise socket.timeout("timed out while reading response body")
+
+        with patch(
+            "jin10_market_report.fetcher.urllib.request.urlopen",
+            return_value=TimeoutResponse(),
+        ):
+            try:
+                _request_json(
+                    "https://flash-api.jin10.com/get_flash_list",
+                    {"channel": -8200, "vip": 1},
+                    timeout=20,
+                )
+            except Exception as exc:  # noqa: BLE001 - verify the public error contract.
+                caught = exc
+            else:
+                self.fail("expected a network error")
+
+        self.assertIsInstance(caught, Jin10FetchError)
+        self.assertIn("网络访问失败", str(caught))
+
     def test_external_source_integrity_audit_counts(self) -> None:
         """Changing source counts or omitting grouped source IDs breaks audit traceability."""
         external_update = {
@@ -311,6 +380,166 @@ class DailyRequirementTests(unittest.TestCase):
         )
         self.assertEqual(label, "20260724_0800")
 
+    def test_three_day_window_uses_weekend_report_copy(self) -> None:
+        formatter = getattr(tracking_report, "_report_window_copy", None)
+        self.assertIsNotNone(formatter)
+
+        copy = formatter(
+            datetime(2026, 9, 18, 0, 0, tzinfo=UTC),
+            datetime(2026, 9, 21, 0, 0, tzinfo=UTC),
+        )
+
+        self.assertEqual(copy["performance_label"], "72小时涨跌幅")
+        self.assertEqual(copy["news_scope_note"], "覆盖周末新闻，截止时刻不含")
+        self.assertEqual(copy["chart_label"], "Brent 72小时30分钟K线与关键新闻事件")
+
+    def test_regular_weekend_closure_is_an_expected_brent_gap(self) -> None:
+        previous = datetime(2026, 9, 18, 20, 55, tzinfo=UTC)
+        current = datetime(2026, 9, 20, 22, 10, tzinfo=UTC)
+
+        self.assertTrue(
+            tracking_report._is_expected_brent_maintenance_gap(
+                previous,
+                current,
+                "Asia/Shanghai",
+            )
+        )
+
+    def test_live_window_start_during_weekend_is_covered_by_monday_open(self) -> None:
+        start = datetime(2026, 10, 17, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 10, 19, 0, 0, tzinfo=UTC)
+        monday_open = datetime(2026, 10, 18, 22, 10, tzinfo=UTC)
+
+        class Store:
+            def raw_news_between(self, *_args):
+                return [
+                    {
+                        "raw_id": f"raw-{index}",
+                        "published_at_utc": published.isoformat().replace("+00:00", "Z"),
+                        "title": "窗口新闻",
+                        "body": "普通新闻",
+                        "detail": "",
+                        "is_summary": 0,
+                    }
+                    for index, published in enumerate(
+                        (
+                            start + timedelta(minutes=5),
+                            start + timedelta(hours=9),
+                            start + timedelta(hours=17),
+                            end - timedelta(minutes=5),
+                        )
+                    )
+                ]
+
+            def news_for_reaction_range(self, *_args):
+                return []
+
+            def brent_day_klines(self, *_args):
+                return [
+                    {
+                        "ts_utc": (monday_open + timedelta(minutes=5 * index))
+                        .isoformat()
+                        .replace("+00:00", "Z"),
+                        "close": 108.0,
+                    }
+                    for index in range(22)
+                ]
+
+            def reaction_rows_between(self, *_args):
+                return []
+
+            def raw_news_near(self, *_args, **_kwargs):
+                return []
+
+        audit = _build_window_audit(Store(), BrentConfig(), start, end, "Asia/Shanghai")
+
+        self.assertTrue(audit["price_start_covered"])
+        self.assertTrue(audit["price_end_covered"])
+        self.assertTrue(audit["price_boundary_covered"])
+        self.assertFalse(
+            any("统计窗口起点未覆盖" in item for item in audit["coverage_gaps"])
+        )
+
+    def test_parse_iso_utc_accepts_bluesky_nanosecond_timestamp(self) -> None:
+        parsed = parse_iso_utc("2026-10-16T14:43:36.66095359+00:00")
+
+        self.assertEqual(parsed, datetime(2026, 10, 16, 14, 43, 36, 660953, tzinfo=UTC))
+
+    def test_isw_bluesky_thread_is_fallback_when_article_page_is_blocked(self) -> None:
+        uri = "at://did:plc:isw/app.bsky.feed.post/example"
+        feed = {
+            "feed": [
+                {
+                    "post": {
+                        "uri": uri,
+                        "record": {
+                            "createdAt": "2026-10-18T20:52:57.12345678Z",
+                            "text": "NEW: Iran Update, October 18, 2026",
+                            "facets": [],
+                        },
+                    }
+                }
+            ]
+        }
+        thread = {
+            "thread": {
+                "post": {
+                    "record": {
+                        "text": "NEW: First official takeaway with enough detail. Read more: isw.pub/example",
+                        "facets": [{"features": [{"uri": "https://isw.pub/example"}]}],
+                    }
+                },
+                "replies": [
+                    {
+                        "post": {
+                            "record": {
+                                "text": "2/ Second official takeaway with enough detail.",
+                                "facets": [],
+                            }
+                        },
+                        "replies": [],
+                    },
+                    {
+                        "post": {
+                            "record": {
+                                "text": "3/ Iran Update, October 18, 2026: isw.pub/example",
+                                "facets": [],
+                            }
+                        },
+                        "replies": [],
+                    },
+                ],
+            }
+        }
+
+        with (
+            patch(
+                "jin10_market_report.external_update._request_json",
+                side_effect=[feed, thread],
+            ),
+            patch(
+                "jin10_market_report.external_update._resolve_isw_short_url",
+                return_value="https://understandingwar.org/research/middle-east/iran-update-october-18-2026/",
+            ),
+            patch(
+                "jin10_market_report.external_update._request_text",
+                side_effect=RuntimeError("HTTP 403"),
+            ),
+        ):
+            result = _fetch_from_official_bluesky(
+                datetime(2026, 10, 19, 0, 0, tzinfo=UTC)
+            )
+
+        self.assertEqual(result["fetch_method"], "ISW官方Bluesky备用源")
+        self.assertEqual(
+            result["source_key_takeaways"],
+            [
+                "First official takeaway with enough detail.",
+                "Second official takeaway with enough detail.",
+            ],
+        )
+        self.assertEqual(result["title"], "Iran Update, October 18, 2026")
+
     def test_window_audit_stops_at_scheduled_0800(self) -> None:
         start = datetime(2026, 7, 23, 0, 0, tzinfo=UTC)
         end = start + timedelta(days=1)
@@ -392,6 +621,57 @@ class DailyRequirementTests(unittest.TestCase):
             any("60分钟价格观察期" in item or "09:05" in item for item in audit["coverage_gaps"])
         )
         self.assertEqual(max(row["close"] for row in audit["price_rows"]), 90.0)
+
+    def test_window_audit_counts_five_minute_bucket_span_at_cutoff(self) -> None:
+        start = datetime(2026, 10, 28, 0, 0, tzinfo=UTC)
+        end = start + timedelta(days=1)
+
+        class Store:
+            def raw_news_between(self, *_args):
+                return [
+                    {
+                        "raw_id": f"raw-{index}",
+                        "published_at_utc": published.isoformat().replace("+00:00", "Z"),
+                        "title": "窗口新闻",
+                        "body": "普通新闻",
+                        "detail": "",
+                        "is_summary": 0,
+                    }
+                    for index, published in enumerate(
+                        (
+                            start + timedelta(minutes=5),
+                            start + timedelta(hours=9),
+                            start + timedelta(hours=17),
+                            end - timedelta(minutes=5),
+                        )
+                    )
+                ]
+
+            def news_for_reaction_range(self, *_args):
+                return []
+
+            def brent_day_klines(self, *_args):
+                return [
+                    {
+                        "ts_utc": (start + timedelta(minutes=5 * index))
+                        .isoformat()
+                        .replace("+00:00", "Z"),
+                        "close": 110.0,
+                    }
+                    for index in range(((24 * 60) - 10) // 5)
+                ]
+
+            def reaction_rows_between(self, *_args):
+                return []
+
+            def raw_news_near(self, *_args, **_kwargs):
+                return []
+
+        audit = _build_window_audit(Store(), BrentConfig(), start, end, "Asia/Shanghai")
+
+        self.assertEqual(audit["last_price"], end - timedelta(minutes=15))
+        self.assertTrue(audit["price_end_covered"])
+        self.assertTrue(audit["price_boundary_covered"])
 
     def test_0749_news_is_pending_and_preserved(self) -> None:
         start = datetime(2026, 7, 23, 0, 0, tzinfo=UTC)

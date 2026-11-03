@@ -1,0 +1,21 @@
+# Python >= 3.10
+#
+# Third-party imports used by jin10_market_report/, run_*.py, and tests/:
+# - python-docx: jin10_market_report/report.py, imported by run_jin10_report.py
+#
+# Tracker commands (init-db, run-once, report, backfill) and the unittest
+# suite use the Python standard library. python-docx is listed here so a
+# normal install can also build the Word daily report.
+#
+# Optional LightGBM forecast dependencies are not required for those paths.
+# jin10_market_report/forecast.py imports lightgbm and numpy only when a
+# LightGBM model is constructed, and model_kind="auto" falls back to the
+# built-in logistic model. Install them with:
+#   pip install -r requirements-forecast.txt
+# or:
+#   pip install -e ".[forecast]"
+#
+# pandas is not a dependency of this repository. The Price Layer runner is a
+# subprocess executed with the external six-model project's own virtualenv.
+
+python-docx>=1.1.0

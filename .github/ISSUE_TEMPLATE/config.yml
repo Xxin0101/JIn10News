@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 安全问题
+    url: https://github.com/Xxin0101/JIn10News/security/advisories/new
+    about: 请用 GitHub 私人安全通告报告漏洞，不要开公开 Issue。

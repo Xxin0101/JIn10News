@@ -1,8 +1,75 @@
-# 金十数据伊朗及中东能源贸易实时新闻抓取与日报生成工具
+# 金十中东能源新闻与 Brent 反应日报
 
-这个工具每天手动运行一次，自动从金十数据公开实时资讯接口抓取过去 24 小时内的快讯，筛选伊朗、中东局势、战争安全、制裁政策、能源供应、航运物流、贸易流向及价格市场影响相关内容，并生成 Word 日报。
+从金十数据公开快讯里筛选伊朗、中东局势、能源供应、航运和贸易相关内容，对照 Brent 原油价格，生成 Word 日报或 HTML/Markdown 滚动日报。
 
-2026-06-30 起，项目新增“金十新闻事件 + Brent 市场反应”日内跟踪模式。新模式保留原有金十抓取和关键词筛选逻辑，增加 SQLite 状态库、Brent 原油 5 分钟 K 线缓存、新闻发布后 5/15/30/60 分钟价格反应分析，以及本地 HTML/Markdown 日报。
+本工具不是金十数据或 Yahoo Finance 的官方产品。使用前请阅读[免责声明](#免责声明)。
+
+## 功能
+
+- 抓取金十公开实时快讯，按关键词和相关性筛选，合并高度相似消息，并生成 Word 日报。
+- 把筛选后的新闻写入 SQLite，缓存 Yahoo Finance `BZ=F` 的 Brent 5 分钟 K 线，计算发布后 5/15/30/60 分钟以及前 30 分钟到后 30 分钟的价格变化。
+- 按北京时间 08:00 滚动窗口输出 HTML/Markdown 正式日报和审计报告。正式复盘先看价格异动，再匹配供给端相关新闻。
+- 跟踪任务只做规则计算，不调用大模型。方向预测在未安装 LightGBM 时使用内置逻辑回归。
+- 日报末尾可以追加“明日 Brent 价格预测”。该板块读取仓库之外的六模型结果，项目位置用 `BRENT_PRICE_LAYER_ROOT` 指定；不可用时其余日报仍会生成。
+
+## 快速开始
+
+需要 Python 3.10 或更高版本。
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+`pip install -r requirements.txt` 安装同一组运行依赖。`python-docx` 供 `run_jin10_report.py` 生成 Word；`init-db` 和 `run-once` 本身只使用标准库。
+
+初始化数据库，并手动跑一轮。`run-once` 会请求金十和 Yahoo Finance 的公开接口，需要网络：
+
+```bash
+python3 run_jin10_tracker.py init-db
+python3 run_jin10_tracker.py run-once
+```
+
+默认数据库是 `data/jin10_tracker.sqlite`。日报写到 `outputs/tracker/`，日志写到 `logs/`。这三个目录已在 `.gitignore` 中。
+
+只生成 Word 日报：
+
+```bash
+python3 run_jin10_report.py
+```
+
+离线测试：
+
+```bash
+python3 -m unittest discover -s tests
+```
+
+当前测试使用模拟响应，不访问外网，也不依赖本机私有路径。持续集成跑的是这套完整测试。
+
+需要 LightGBM 预测而不是内置逻辑回归回退时：
+
+```bash
+pip install -e ".[forecast]"
+```
+
+## 免责声明
+
+- 本项目为非官方工具，与金十数据、Yahoo Finance 没有隶属关系。
+- 程序请求的是这些站点的公开接口。接口、访问策略和频率限制都可能变化；请遵守对方的服务条款，并保留请求间隔。
+- 输出只用于研究与信息整理，不构成投资建议。
+- 新闻发布时间附近的价格变化只描述同期市场表现，不能据此认定因果关系。
+
+## 环境变量
+
+| 变量 | 作用 |
+| --- | --- |
+| `BRENT_PRICE_LAYER_ROOT` | 外部六模型 Brent 回测项目的根目录。公开使用时请设置它。目录或模型产物不可用时，Price Layer 会说明原因，其余日报照常生成。 |
+| `BRENT_PRICE_LAYER_HOLIDAYS` | 逗号分隔的额外全日休市日期，格式 `YYYY-MM-DD`。 |
+
+Price Layer 在该外部项目自己的虚拟环境里运行选中模型。`pandas` 以及 ARIMA、LSTM、XGBoost 等依赖属于那个项目，不属于本仓库。
+
+参与修改请看 [CONTRIBUTING.md](CONTRIBUTING.md)。安全问题请看 [SECURITY.md](SECURITY.md)。
 
 ## 原 Word 日报运行方式
 
@@ -211,9 +278,9 @@ python3 run_jin10_tracker.py backfill-day --date 2026-07-02
 - `multi_event_group_id`：同时间窗口多新闻事件组。
 - `note`：异常或补充说明。
 
-## 真实烟测结果示例
+## 滚动日报重算示例
 
-2026-07-02 本地重算 08:00 滚动日报：
+下面是一次只根据本地数据库重算 2026-07-02 08:00 滚动窗口的输出摘要：
 
 ```bash
 python3 run_jin10_tracker.py report --date 2026-07-02
@@ -258,10 +325,10 @@ outputs/tracker/Jin10_Brent_Rolling_Reaction_20260702_0800.md
 
 常规 Brent 滚动日报会在末尾追加“明日 Brent 价格预测”。该板块只读取已经完成的六模型 Walk-Forward/OOS 结果，按日报截止时点截断历史记录后动态选择模型，并只运行当期选中的模型预测下一交易日；新闻、ISW、特朗普专栏、事件和基本面数据均不会进入 Price Layer。
 
-默认复用本机六模型项目：
+六模型项目不在本仓库内。把 `BRENT_PRICE_LAYER_ROOT` 设为该项目根目录。未设置时，程序还会查找一个仅适用于原开发机的默认位置；其他环境请显式设置该变量，不要依赖这个默认位置。交易所临时新增全日休市时，用逗号分隔的 `BRENT_PRICE_LAYER_HOLIDAYS=YYYY-MM-DD,...` 补充日期。
 
-```text
-/Users/xiaoxin/Documents/ChatGPT/Brent数据量化回测
-```
+模型产物、完整交易日价格或依赖不可用时，原日报仍照常生成，新增板块会写明不可用原因。选中模型由外部项目自己的虚拟环境执行。原有 `forecast-report` 冻结快照流程保持只读，不会触发这套新增模型运行。
 
-如目录迁移，可通过 `BRENT_PRICE_LAYER_ROOT` 指向新的六模型项目根目录；遇到交易所临时新增的全日休市，可用逗号分隔的 `BRENT_PRICE_LAYER_HOLIDAYS=YYYY-MM-DD,...` 补充日期。模型产物、完整交易日价格或依赖不可用时，原日报仍照常生成，新增板块会明确披露不可用原因。原有 `forecast-report` 冻结快照流程保持只读，不会触发这套新增模型运行。
+## 许可证
+
+本项目使用 [MIT License](LICENSE)。Copyright (c) 2026 Xxin0101 / Xincheng Huang。

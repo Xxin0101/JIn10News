@@ -1,0 +1,5 @@
+# Optional. Not needed for init-db, run-once, the Word report, or unittest.
+# Used by jin10_market_report/forecast.py when LightGBM is selected.
+-r requirements.txt
+lightgbm>=4.0.0
+numpy>=1.24

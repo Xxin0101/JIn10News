@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jin10-market-report"
+version = "0.1.0"
+description = "Filter public Jin10 flashes on Middle East energy news and build Brent reaction reports."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Xxin0101 / Xincheng Huang" }]
+keywords = ["jin10", "brent", "news", "energy"]
+classifiers = [
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3 :: Only",
+]
+dependencies = [
+    "python-docx>=1.1.0",
+]
+
+[project.optional-dependencies]
+forecast = [
+    "lightgbm>=4.0.0",
+    "numpy>=1.24",
+]
+
+[project.urls]
+Homepage = "https://github.com/Xxin0101/JIn10News"
+Issues = "https://github.com/Xxin0101/JIn10News/issues"
+Source = "https://github.com/Xxin0101/JIn10News"
+
+[tool.setuptools.packages.find]
+include = ["jin10_market_report*"]

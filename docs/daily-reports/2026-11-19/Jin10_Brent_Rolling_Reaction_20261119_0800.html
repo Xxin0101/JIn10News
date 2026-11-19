@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>金十新闻事件 + Brent市场反应滚动日报</title>
+<style>
+:root{color-scheme:light;--ink:#172033;--muted:#64748b;--line:#dfe6ef;--soft:#f6f8fb;--news:#2563eb;--up:#c2413b;--down:#1b7f5a}
+*{box-sizing:border-box}body{margin:0;padding:34px 24px;background:#f3f6fa;color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif;line-height:1.62;overflow-x:hidden}
+.report-shell{max-width:1320px;margin:0 auto;padding:42px 48px 34px;background:#fff;border:1px solid #e4eaf1;border-radius:22px;box-shadow:0 18px 48px rgba(15,23,42,.07)}
+h1{margin:0;color:#0f2747;font-size:30px;line-height:1.25;letter-spacing:-.02em}.report-meta{margin:10px 0 28px}.report-meta p{margin:2px 0;color:var(--muted);font-size:14px}
+h2{margin:0;color:#152a46;font-size:19px;line-height:1.35}.section-title{margin:30px 0 12px}p{margin:8px 0;color:#334155}blockquote{margin:16px 0;padding:10px 14px;border-left:3px solid #94a3b8;background:var(--soft);color:#475569}
+a{color:#165dcc;text-underline-offset:3px}ul{margin:8px 0;padding-left:22px}li{margin:8px 0}
+.executive-summary{margin:22px 0 16px;padding:20px 24px;border:1px solid #cbdcf1;border-left:4px solid var(--news);border-radius:14px;background:#f8fbff}.executive-summary h2{margin-bottom:10px}.executive-summary ul{margin-bottom:0}.executive-summary li{color:#273a55}
+.forecast-card{margin:18px 0 22px;padding:24px;border:1px solid #7aa7e6;border-radius:18px;background:linear-gradient(145deg,#eef6ff 0%,#f8fbff 56%,#fff 100%);box-shadow:0 14px 30px rgba(37,99,235,.10)}.forecast-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px}.forecast-heading h2{font-size:23px;color:#123d73}.forecast-kicker{display:block;margin-bottom:4px;color:#2563eb;font-size:11px;font-weight:800;letter-spacing:.14em}.confidence-badge{display:inline-flex;padding:6px 11px;border-radius:999px;background:#173f7a;color:#fff;font-size:12px;font-weight:800}.forecast-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.forecast-metric{padding:13px 14px;border:1px solid #c5daf5;border-radius:12px;background:rgba(255,255,255,.84)}.forecast-metric span{display:block;margin-bottom:5px;color:#5a7090;font-size:12px}.forecast-metric strong{display:block;color:#143960;font-size:15px}.forecast-note{margin:12px 0 0;color:#496581;font-size:13px}.forecast-evidence-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:16px}.forecast-evidence-grid>div{padding:13px 14px;border-top:1px solid #c9dcf4}.forecast-evidence-grid h3{margin:0 0 5px;color:#234d7d;font-size:14px}.forecast-evidence-grid ul{margin:0}.forecast-evidence-grid li{color:#405773;font-size:13px}
+.important-news-section{margin:22px 0;padding:22px;border:1px solid var(--line);border-radius:16px;background:#fbfcfe}.important-news-section>h2{margin-bottom:5px}.important-news-intro{margin:0 0 14px;color:#66768b;font-size:13px}.important-news-item{padding:15px 0;border-top:1px solid #dfe7f0}.important-news-item:first-of-type{border-top:0}.important-news-item h3{margin:8px 0 7px;font-size:16px;color:#183b62}.important-news-item p{margin:5px 0;color:#40536b;font-size:13px}.important-news-item>a{display:inline-block;margin-top:6px;font-size:13px}.important-news-meta{display:flex;flex-wrap:wrap;gap:7px}.important-news-meta time,.important-news-meta span{padding:3px 7px;border-radius:999px;background:#edf3fa;color:#47627f;font-size:11px}.important-news-reaction{font-variant-numeric:tabular-nums}
+.forecast-backtest{margin-top:18px;padding-top:14px;border-top:1px solid #b9d1ef}.forecast-backtest h3{margin:0 0 8px;color:#234d7d;font-size:15px}.forecast-backtest .table-wrap{margin:0;background:rgba(255,255,255,.86)}.forecast-backtest table{font-size:12px}
+.price-layer-card{margin:24px 0 4px;padding:22px;border:1px solid #9fc3e8;border-radius:16px;background:#f7fbff}.price-layer-kicker{display:block;margin-bottom:4px;color:#2563eb;font-size:11px;font-weight:800;letter-spacing:.14em}.price-layer-card h2{margin-bottom:14px;color:#123d73}.price-layer-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}.price-layer-metric{padding:11px 12px;border:1px solid #d3e3f4;border-radius:10px;background:#fff}.price-layer-metric span{display:block;margin-bottom:4px;color:#60758d;font-size:11px}.price-layer-metric strong{display:block;color:#183b62;font-size:14px}.price-layer-summary{margin:14px 0 6px;color:#294d73;font-weight:650}.price-layer-note{margin:6px 0 0;color:#66768b;font-size:12px}
+.context-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:18px 0 24px}.context-card{padding:16px 18px;border:1px solid var(--line);border-radius:14px;background:var(--soft)}.context-card h2{margin-bottom:8px}.context-card ul{margin-bottom:0}.context-card li{color:#475569;font-size:13px}
+.market-lede{margin:22px 0 26px;padding:16px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.market-lede h2{margin:0 0 8px}.market-lede p{margin:4px 0;color:#2c3b52;font-size:15px}
+.metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:12px 0 22px}.metric-card{padding:18px 18px 16px;border:1px solid var(--line);border-radius:14px;background:#fff}.metric-label{display:block;margin-bottom:7px;color:var(--muted);font-size:13px}.metric-value{display:block;font:700 26px/1.15 'SFMono-Regular',Consolas,monospace;color:#152a46}.metric-value.metric-up{color:var(--up)}.metric-value.metric-down{color:var(--down)}
+.news-panel{min-height:92px;margin:14px 0 0;padding:18px 20px;border:1px solid #8bb7f0;border-radius:14px;background:#eff6ff;box-shadow:0 8px 22px rgba(37,99,235,.08)}.news-panel-empty{margin:14px 0;color:#315c91;text-align:center}.news-panel-title{margin:0;color:#163f75;font-size:18px}.news-display-summary{margin:5px 0 12px;color:#496581;font-size:13px}.event-summary{display:flex;flex-wrap:wrap;gap:8px 18px;margin:8px 0 12px;color:#35506f;font-size:14px}.event-reactions{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:12px 0}.event-reaction{padding:8px 10px;border:1px solid #c7dcf5;border-radius:9px;background:#fff}.event-reaction span{display:block;color:var(--muted);font-size:11px}.event-reaction strong{font:700 14px/1.3 'SFMono-Regular',Consolas,monospace}.news-list-heading{margin:16px 0 4px;color:#244b78;font-size:14px}.news-entry{padding:12px 0}.news-entry+.news-entry{border-top:1px solid #cbdcf1}.news-entry[hidden]{display:none}.news-time{color:var(--muted);font:600 12px/1.4 'SFMono-Regular',Consolas,monospace}.news-title{display:block;margin:4px 0 5px;color:#173f7a;font-size:15px;font-weight:650}.news-meta{margin:4px 0 0;color:#52647b;font-size:13px}.news-source-link{display:inline-block;margin-top:7px;font-size:13px;font-weight:650}.news-expand,.all-day-button{margin-top:10px;padding:7px 12px;border:1px solid #8eb7ea;border-radius:8px;background:#fff;color:#174d88;font:650 13px/1.2 inherit;cursor:pointer}.market-interpretation{margin-top:14px;padding-top:12px;border-top:1px solid #cbdcf1}.attribution-line{margin-top:9px;color:#244b78;font-weight:650}.unexplained-message{margin:14px 0 6px;color:#334155;font-weight:650}
+.chart-figure{margin:0;max-width:100%;overflow-x:auto;border:1px solid var(--line);border-radius:16px;background:#fff}.chart-figure svg{display:block;width:100%;height:auto;min-width:1040px}.unmatched-band-hit{cursor:pointer;pointer-events:all;outline:none;fill:transparent;stroke:transparent;stroke-width:2}.unmatched-band-hit:hover,.unmatched-band-hit:focus,.unmatched-band-hit.is-active{fill:rgba(148,163,184,.18);stroke:#64748b}.news-marker.is-active .marker-tag{fill:#dbeafe;stroke:#1d4ed8}.news-marker.is-active .marker-dot{r:7}
+.trump-card{width:100%;margin:20px 0 0;padding:20px 22px;border:1px solid var(--line);border-radius:14px;background:#fff}.trump-card h2{margin-bottom:10px}.trump-statement{padding:14px 0}.trump-statement+.trump-statement{border-top:1px solid var(--line)}.statement-meta{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;margin-bottom:7px;color:var(--muted);font-size:13px}.statement-meta time{font-family:'SFMono-Regular',Consolas,monospace}.topic-list{display:flex;flex-wrap:wrap;gap:6px}.topic-chip{display:inline-flex;padding:3px 8px;border-radius:999px;background:#edf4ff;color:#24518a;font-size:12px;line-height:1.35}.statement-text{margin:0;color:#2f4058}.statement-sources{margin:8px 0 0}.statement-sources li{margin:4px 0;color:#52647b;font-size:13px}
+.summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:20px 0 0}.summary-card{padding:20px 22px;border:1px solid var(--line);border-radius:14px;background:#fff}.summary-card h2{margin-bottom:10px}.summary-card ul{margin-bottom:0}.summary-card li{color:#3d4e65}
+.audit-link{margin-top:34px;padding-top:22px;border-top:1px solid var(--line)}.audit-link a{display:inline-flex;padding:10px 15px;border:1px solid #b9c8db;border-radius:10px;background:#fff;color:#244b78;font-weight:650;text-decoration:none}.audit-link a:hover{background:#f5f8fc}
+.table-wrap{overflow-x:auto;margin:14px 0 26px;border:1px solid var(--line);border-radius:10px}table{width:100%;border-collapse:collapse;font-size:14px;white-space:nowrap}th,td{padding:9px 11px;border-bottom:1px solid #e6ebf1}
+@media(max-width:820px){body{padding:0;background:#fff}.report-shell{padding:26px 16px 30px;border:0;border-radius:0;box-shadow:none}.executive-summary,.forecast-card,.price-layer-card{padding:18px 16px}.forecast-grid,.forecast-evidence-grid,.price-layer-grid{grid-template-columns:1fr}.context-grid{grid-template-columns:1fr}.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.event-reactions{grid-template-columns:repeat(2,minmax(0,1fr))}.summary-grid{grid-template-columns:1fr}.chart-figure{margin-left:-16px;margin-right:-16px;border-radius:0;padding:0 16px;border-left:0;border-right:0}h1{font-size:25px}.metric-value{font-size:22px}.news-panel{padding:16px 14px}.trump-card,.summary-card{padding:18px 16px}.statement-meta{align-items:flex-start;flex-direction:column}}
+@media print{body{padding:0;background:#fff}.report-shell{max-width:none;padding:0;border:0;box-shadow:none}.chart-figure svg{min-width:0}.news-panel{display:none}a{color:inherit;text-decoration:none}}
+</style></head><body class="formal-report">
+<main class="report-shell"><h1>金十新闻事件 + Brent市场反应滚动日报（20261119 08:00）</h1>
+<section class="executive-summary" aria-label="今日重点"><h2>今日重点</h2><ul><li data-summary-item="true">Brent正式结算价91.95美元/桶，下降1.28%（金十03:45报道）。Yahoo BZ=F最后有效报价为07:50的88.73美元，样本变化-4.90%，高低区间93.44–87.60美元。两种数据口径差异显著，尚未确认差异原因。</li><li data-summary-item="true">23:30 EIA商业原油库存增加338万桶，市场预期减少50万桶，偏空库存意外与夜间承压方向一致。但23:05起跌在数据之前，库存只能解释后续压力，不能解释全天跌势。</li><li data-summary-item="true">16:00–16:55下跌3.00%为最大跌段。同期地缘、制裁及网络攻击新闻缺少充分的即时因果证据，保留解释不足。</li><li data-summary-item="true">ADNOC确认船舶遇袭及人员伤亡，构成海峡运输风险；Equinor表示网络攻击未影响生产，不能据此推断实际减供。</li><li data-summary-item="true">本期覆盖1,594条原始快讯、270根五分钟K线，末根时点07:50。ISW采用11月17日更新，11月18日版官方发布晚于本期截止点。</li></ul></section>
+<section class="price-layer-card" aria-label="今日 Brent 价格预测"><span class="price-layer-kicker">PRICE LAYER</span><h2>今日 Brent 价格预测</h2><div class="price-layer-grid"><div class="price-layer-metric"><span>预测日期</span><strong>2026-11-19</strong></div><div class="price-layer-metric"><span>当前收盘价</span><strong>88.76 美元/桶</strong></div><div class="price-layer-metric"><span>选用模型</span><strong>ARIMA</strong></div><div class="price-layer-metric"><span>预测价格</span><strong>88.87 美元/桶</strong></div><div class="price-layer-metric"><span>预测涨跌幅</span><strong>+0.13%</strong></div><div class="price-layer-metric"><span>预测方向</span><strong>上涨</strong></div><div class="price-layer-metric"><span>Direction Accuracy</span><strong>47.70%</strong></div><div class="price-layer-metric"><span>Balanced Accuracy</span><strong>31.95%</strong></div></div><p class="price-layer-summary">Price Layer 当前选择 ARIMA 作为历史样本外表现最好的模型，预测下一交易日 Brent 小幅上涨，预测价格为 88.87 美元/桶，预测涨跌幅约 +0.13%。历史方向准确率47.70%、平衡准确率31.95%，预测幅度+0.13%较小，方向信号较弱。模型收盘价88.76属于其价格输入口径，与金十报道的结算价不同。</p><p class="price-layer-note">仅使用历史价格数据，不使用任何新闻或非价格输入。</p></section>
+<div class="report-meta">
+<p>统计窗口：2026-11-18 08:00 至 2026-11-19 08:00（Asia/Shanghai）</p>
+<p>新闻范围：2026-11-18 08:00 至 2026-11-19 08:00（不含截止时刻）</p>
+<p>数据来源：金十数据快讯｜Yahoo Finance / BZ=F / 5m｜金十数据特朗普专栏｜ISW Iran Update（仅用于后续监测）</p>
+</div>
+<blockquote>Price Layer 当前选择 ARIMA 作为历史样本外表现最好的模型，预测下一交易日 Brent 小幅上涨，预测价格为 88.87 美元/桶，预测涨跌幅约 +0.13%。历史方向准确率47.70%、平衡准确率31.95%，预测幅度+0.13%较小，方向信号较弱。模型收盘价88.76属于其价格输入口径，与金十报道的结算价不同。</blockquote>
+<section class="market-lede" aria-label="本窗口市场主线"><h2>本窗口市场主线</h2>
+<p>Brent本窗口整体下跌 -4.90%。</p>
+<p>最主要交易逻辑：暂无足够明确的单一交易主线。</p>
+<p>已解释异动 1 段，未解释异动 10 段。</p>
+</section>
+<h2 class="section-title">Brent关键指标</h2>
+<div class="metric-grid" aria-label="Brent关键指标">
+<div class="metric-card"><span class="metric-label">最新价</span><span class="metric-value">88.73</span></div>
+<div class="metric-card"><span class="metric-label">24小时涨跌幅</span><span class="metric-value metric-down">-4.90%</span></div>
+<div class="metric-card"><span class="metric-label">日内最高价</span><span class="metric-value">93.44</span></div>
+<div class="metric-card"><span class="metric-label">日内最低价</span><span class="metric-value">87.60</span></div>
+</div>
+<figure class="chart-figure" aria-label="Brent 24小时30分钟K线与关键新闻事件"><svg xmlns="http://www.w3.org/2000/svg" width="1440" height="650" viewBox="0 0 1440 650" role="img" aria-labelledby="chart-title chart-desc">
+<style>
+text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif;fill:#172033}
+.mono{font-family:'SFMono-Regular',Consolas,'Liberation Mono',monospace}
+.axis{font-size:12px;fill:#64748B}.small{font-size:11px;fill:#64748B}.label{font-size:12px;font-weight:700}.title{font-size:22px;font-weight:750}.subtitle{font-size:12px;fill:#475569}
+.news-marker{cursor:pointer;outline:none}.news-marker .marker-tag{transition:fill .15s,stroke .15s}.news-marker:hover .marker-tag,.news-marker:focus .marker-tag,.news-marker.is-active .marker-tag{fill:#DBEAFE;stroke:#1D4ED8}.news-marker:hover .marker-dot,.news-marker:focus .marker-dot,.news-marker.is-active .marker-dot{r:7}
+</style>
+<rect width="1440" height="650" rx="16" fill="#FFFFFF"/>
+<rect x="1" y="1" width="1438" height="648" rx="15" fill="none" stroke="#D8E1EA"/>
+<text id="chart-title" x="92" y="34" class="title">Brent 24小时价格走势</text>
+<text id="chart-desc" x="92" y="57" class="subtitle">2026-11-18 08:00 至 2026-11-19 08:00（北京时间）｜30分钟K线｜46根有效K线</text>
+<rect x="92" y="75" width="12" height="12" fill="#C2413B"/><text x="111" y="85" class="small">上涨</text>
+<rect x="165" y="75" width="12" height="12" fill="#1B7F5A"/><text x="184" y="85" class="small">下跌</text>
+<circle cx="246" cy="81" r="5" fill="#2563EB"/><text x="258" y="85" class="small">可点击新闻时间</text>
+<rect x="372" y="74" width="15" height="13" rx="2" fill="#CBD5E1" opacity="0.55"/><text x="395" y="85" class="small">暂无直接新闻解释</text>
+<rect x="92" y="118" width="1268" height="432" fill="#FBFCFE" stroke="#E2E8F0"/>
+<rect class="unmatched-band" x="426.6" y="118.0" width="44.0" height="432.0" fill="#94A3B8" opacity="0.11"><title>14:20–15:10 暂无直接新闻解释</title></rect>
+<rect class="unmatched-band" x="514.7" y="118.0" width="48.4" height="432.0" fill="#94A3B8" opacity="0.11"><title>16:00–16:55 暂无直接新闻解释</title></rect>
+<rect class="unmatched-band" x="554.3" y="118.0" width="39.6" height="432.0" fill="#94A3B8" opacity="0.11"><title>16:45–17:30 暂无直接新闻解释</title></rect>
+<rect class="unmatched-band" x="651.2" y="118.0" width="35.2" height="432.0" fill="#94A3B8" opacity="0.11"><title>18:35–19:15 暂无直接新闻解释</title></rect>
+<rect class="unmatched-band" x="765.6" y="118.0" width="44.0" height="432.0" fill="#94A3B8" opacity="0.11"><title>20:45–21:35 暂无直接新闻解释</title></rect>
+<rect class="unmatched-band" x="836.1" y="118.0" width="48.4" height="432.0" fill="#94A3B8" opacity="0.11"><title>22:05–23:00 暂无直接新闻解释</title></rect>
+<rect class="unmatched-band" x="866.9" y="118.0" width="30.8" height="432.0" fill="#94A3B8" opacity="0.11"><title>22:40–23:15 暂无直接新闻解释</title></rect>
+<rect class="unmatched-band" x="888.9" y="118.0" width="30.8" height="432.0" fill="#94A3B8" opacity="0.11"><title>23:05–23:40 暂无直接新闻解释</title></rect>
+<rect class="unmatched-band" x="937.3" y="118.0" width="66.0" height="432.0" fill="#94A3B8" opacity="0.11"><title>00:00–01:15 暂无直接新闻解释</title></rect>
+<rect class="unmatched-band" x="990.2" y="118.0" width="26.4" height="432.0" fill="#94A3B8" opacity="0.11"><title>01:00–01:30 暂无直接新闻解释</title></rect>
+<rect class="unmatched-band" x="1082.6" y="118.0" width="35.2" height="432.0" fill="#94A3B8" opacity="0.11"><title>02:45–03:25 暂无直接新闻解释</title></rect>
+<line x1="92.0" y1="494.7" x2="1360.0" y2="494.7" stroke="#E5EAF0" stroke-width="1"/>
+<text x="82.0" y="498.7" text-anchor="end" class="axis mono">88.00</text>
+<line x1="92.0" y1="367.2" x2="1360.0" y2="367.2" stroke="#E5EAF0" stroke-width="1"/>
+<text x="82.0" y="371.2" text-anchor="end" class="axis mono">90.00</text>
+<line x1="92.0" y1="239.6" x2="1360.0" y2="239.6" stroke="#E5EAF0" stroke-width="1"/>
+<text x="82.0" y="243.6" text-anchor="end" class="axis mono">92.00</text>
+<line x1="92.0" y1="118.0" x2="92.0" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="92.0" y="574.0" text-anchor="start" class="axis mono">11-18 08:00</text>
+<line x1="197.7" y1="118.0" x2="197.7" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="197.7" y="574.0" text-anchor="middle" class="axis mono">10:00</text>
+<line x1="303.3" y1="118.0" x2="303.3" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="303.3" y="574.0" text-anchor="middle" class="axis mono">12:00</text>
+<line x1="409.0" y1="118.0" x2="409.0" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="409.0" y="574.0" text-anchor="middle" class="axis mono">14:00</text>
+<line x1="514.7" y1="118.0" x2="514.7" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="514.7" y="574.0" text-anchor="middle" class="axis mono">16:00</text>
+<line x1="620.3" y1="118.0" x2="620.3" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="620.3" y="574.0" text-anchor="middle" class="axis mono">18:00</text>
+<line x1="726.0" y1="118.0" x2="726.0" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="726.0" y="574.0" text-anchor="middle" class="axis mono">20:00</text>
+<line x1="831.7" y1="118.0" x2="831.7" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="831.7" y="574.0" text-anchor="middle" class="axis mono">22:00</text>
+<line x1="937.3" y1="118.0" x2="937.3" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="937.3" y="574.0" text-anchor="middle" class="axis mono">11-19 00:00</text>
+<line x1="1043.0" y1="118.0" x2="1043.0" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="1043.0" y="574.0" text-anchor="middle" class="axis mono">02:00</text>
+<line x1="1148.7" y1="118.0" x2="1148.7" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="1148.7" y="574.0" text-anchor="middle" class="axis mono">04:00</text>
+<line x1="1254.3" y1="118.0" x2="1254.3" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="1254.3" y="574.0" text-anchor="middle" class="axis mono">06:00</text>
+<line x1="1360.0" y1="118.0" x2="1360.0" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="1360.0" y="574.0" text-anchor="end" class="axis mono">11-19 08:00</text>
+<g><title>2026-11-18 08:00 北京时间 | O 93.30 H 93.44 L 93.11 C 93.11 | 5根5分钟K线</title><line x1="105.2" y1="147.8" x2="105.2" y2="168.8" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="96.2" y="156.7" width="18.0" height="12.1" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-18 08:30 北京时间 | O 93.13 H 93.36 L 93.06 C 93.35 | 7根5分钟K线</title><line x1="131.6" y1="152.9" x2="131.6" y2="172.0" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="122.6" y="153.5" width="18.0" height="14.0" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-18 09:00 北京时间 | O 93.31 H 93.31 L 92.92 C 93.03 | 6根5分钟K线</title><line x1="158.0" y1="156.1" x2="158.0" y2="181.0" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="149.1" y="156.1" width="18.0" height="17.9" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-18 09:30 北京时间 | O 92.99 H 93.13 L 92.82 C 92.86 | 5根5分钟K线</title><line x1="184.5" y1="167.6" x2="184.5" y2="187.3" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="175.5" y="176.5" width="18.0" height="8.3" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-18 10:00 北京时间 | O 92.82 H 92.83 L 92.57 C 92.65 | 6根5分钟K线</title><line x1="210.9" y1="186.7" x2="210.9" y2="203.3" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="201.9" y="187.3" width="18.0" height="10.8" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-18 10:30 北京时间 | O 92.62 H 92.81 L 92.56 C 92.73 | 6根5分钟K线</title><line x1="237.3" y1="188.0" x2="237.3" y2="203.9" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="228.3" y="193.1" width="18.0" height="7.0" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-18 11:00 北京时间 | O 92.71 H 92.96 L 92.71 C 92.75 | 6根5分钟K线</title><line x1="263.7" y1="178.4" x2="263.7" y2="194.3" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="254.7" y="191.8" width="18.0" height="2.6" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-18 11:30 北京时间 | O 92.71 H 92.82 L 92.38 C 92.40 | 6根5分钟K线</title><line x1="290.1" y1="187.3" x2="290.1" y2="215.4" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="281.1" y="194.3" width="18.0" height="19.8" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-18 12:00 北京时间 | O 92.58 H 92.74 L 92.55 C 92.71 | 6根5分钟K线</title><line x1="316.5" y1="192.4" x2="316.5" y2="204.5" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="307.6" y="194.3" width="18.0" height="8.3" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-18 12:30 北京时间 | O 92.66 H 92.70 L 92.38 C 92.47 | 5根5分钟K线</title><line x1="343.0" y1="195.0" x2="343.0" y2="215.4" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="334.0" y="197.5" width="18.0" height="12.1" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-18 13:00 北京时间 | O 92.44 H 92.87 L 92.40 C 92.75 | 6根5分钟K线</title><line x1="369.4" y1="184.1" x2="369.4" y2="214.1" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="360.4" y="191.8" width="18.0" height="19.8" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-18 13:30 北京时间 | O 92.77 H 92.78 L 92.41 C 92.51 | 6根5分钟K线</title><line x1="395.8" y1="189.9" x2="395.8" y2="213.5" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="386.8" y="190.5" width="18.0" height="16.6" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-18 14:00 北京时间 | O 92.46 H 92.49 L 92.14 C 92.22 | 6根5分钟K线</title><line x1="422.2" y1="208.4" x2="422.2" y2="230.7" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="413.2" y="210.3" width="18.0" height="15.3" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-18 14:30 北京时间 | O 92.19 H 92.21 L 91.72 C 91.90 | 6根5分钟K线</title><line x1="448.6" y1="226.2" x2="448.6" y2="257.5" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="439.6" y="227.5" width="18.0" height="18.5" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-18 15:00 北京时间 | O 91.88 H 91.88 L 91.45 C 91.52 | 6根5分钟K线</title><line x1="475.0" y1="247.3" x2="475.0" y2="274.7" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="466.1" y="247.3" width="18.0" height="23.0" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-18 15:30 北京时间 | O 91.54 H 91.98 L 91.53 C 91.63 | 6根5分钟K线</title><line x1="501.5" y1="240.9" x2="501.5" y2="269.6" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="492.5" y="263.2" width="18.0" height="5.7" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-18 16:00 北京时间 | O 91.64 H 92.12 L 91.45 C 91.93 | 6根5分钟K线</title><line x1="527.9" y1="232.0" x2="527.9" y2="274.7" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="518.9" y="244.1" width="18.0" height="18.5" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-18 16:30 北京时间 | O 91.94 H 91.96 L 88.38 C 88.89 | 6根5分钟K线</title><line x1="554.3" y1="242.2" x2="554.3" y2="470.5" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="545.3" y="243.4" width="18.0" height="194.5" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-18 17:00 北京时间 | O 88.93 H 89.28 L 88.73 C 89.18 | 6根5分钟K线</title><line x1="580.7" y1="413.1" x2="580.7" y2="448.1" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="571.7" y="419.5" width="18.0" height="15.9" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-18 17:30 北京时间 | O 89.24 H 89.52 L 89.08 C 89.18 | 6根5分钟K线</title><line x1="607.1" y1="397.8" x2="607.1" y2="425.8" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="598.1" y="415.6" width="18.0" height="3.8" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-18 18:00 北京时间 | O 89.22 H 89.59 L 89.22 C 89.43 | 6根5分钟K线</title><line x1="633.5" y1="393.3" x2="633.5" y2="416.9" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="624.6" y="403.5" width="18.0" height="13.4" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-18 18:30 北京时间 | O 89.46 H 89.57 L 89.32 C 89.57 | 6根5分钟K线</title><line x1="660.0" y1="394.6" x2="660.0" y2="410.5" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="651.0" y="394.6" width="18.0" height="7.0" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-18 19:00 北京时间 | O 89.66 H 89.99 L 89.66 C 89.90 | 6根5分钟K线</title><line x1="686.4" y1="367.8" x2="686.4" y2="388.8" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="677.4" y="373.5" width="18.0" height="15.3" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-18 19:30 北京时间 | O 89.89 H 90.11 L 89.86 C 89.98 | 6根5分钟K线</title><line x1="712.8" y1="360.1" x2="712.8" y2="376.1" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="703.8" y="368.4" width="18.0" height="5.7" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-18 20:00 北京时间 | O 89.98 H 90.41 L 89.89 C 90.29 | 6根5分钟K线</title><line x1="739.2" y1="341.0" x2="739.2" y2="374.2" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="730.2" y="348.7" width="18.0" height="19.8" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-18 20:30 北京时间 | O 90.25 H 90.42 L 90.14 C 90.25 | 6根5分钟K线</title><line x1="765.6" y1="340.4" x2="765.6" y2="358.2" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="756.6" y="351.2" width="18.0" height="1.5" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-18 21:00 北京时间 | O 90.20 H 90.68 L 89.72 C 89.87 | 6根5分钟K线</title><line x1="792.0" y1="323.8" x2="792.0" y2="385.0" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="783.1" y="354.4" width="18.0" height="21.0" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-18 21:30 北京时间 | O 89.79 H 90.03 L 89.74 C 89.97 | 6根5分钟K线</title><line x1="818.5" y1="365.2" x2="818.5" y2="383.7" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="809.5" y="369.1" width="18.0" height="11.5" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-18 22:00 北京时间 | O 89.94 H 90.21 L 89.80 C 90.08 | 6根5分钟K线</title><line x1="844.9" y1="353.8" x2="844.9" y2="379.9" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="835.9" y="362.1" width="18.0" height="8.9" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-18 22:30 北京时间 | O 90.07 H 90.15 L 88.82 C 89.15 | 6根5分钟K线</title><line x1="871.3" y1="357.6" x2="871.3" y2="442.4" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="862.3" y="362.7" width="18.0" height="58.7" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-18 23:00 北京时间 | O 89.16 H 89.71 L 89.01 C 89.40 | 6根5分钟K线</title><line x1="897.7" y1="385.7" x2="897.7" y2="430.3" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="888.7" y="405.4" width="18.0" height="15.3" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-18 23:30 北京时间 | O 89.25 H 89.44 L 89.03 C 89.21 | 6根5分钟K线</title><line x1="924.1" y1="402.9" x2="924.1" y2="429.0" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="915.1" y="415.0" width="18.0" height="2.6" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-19 00:00 北京时间 | O 89.19 H 89.25 L 88.67 C 88.77 | 6根5分钟K线</title><line x1="950.5" y1="415.0" x2="950.5" y2="452.0" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="941.6" y="418.8" width="18.0" height="26.8" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-19 00:30 北京时间 | O 88.75 H 88.86 L 88.02 C 88.09 | 6根5分钟K线</title><line x1="977.0" y1="439.9" x2="977.0" y2="493.4" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="968.0" y="446.9" width="18.0" height="42.1" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-19 01:00 北京时间 | O 88.02 H 88.40 L 87.60 C 88.37 | 6根5分钟K线</title><line x1="1003.4" y1="469.2" x2="1003.4" y2="520.2" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="994.4" y="471.1" width="18.0" height="22.3" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-19 01:30 北京时间 | O 88.35 H 88.50 L 87.94 C 88.24 | 6根5分钟K线</title><line x1="1029.8" y1="462.8" x2="1029.8" y2="498.5" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="1020.8" y="472.4" width="18.0" height="7.0" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-19 02:00 北京时间 | O 88.18 H 88.70 L 88.04 C 88.67 | 6根5分钟K线</title><line x1="1056.2" y1="450.1" x2="1056.2" y2="492.1" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="1047.2" y="452.0" width="18.0" height="31.2" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-19 02:30 北京时间 | O 88.50 H 88.68 L 88.39 C 88.66 | 6根5分钟K线</title><line x1="1082.6" y1="451.3" x2="1082.6" y2="469.8" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="1073.6" y="452.6" width="18.0" height="10.2" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-19 03:00 北京时间 | O 88.66 H 89.27 L 88.64 C 89.15 | 6根5分钟K线</title><line x1="1109.0" y1="413.7" x2="1109.0" y2="453.9" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="1100.1" y="421.4" width="18.0" height="31.2" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-19 03:30 北京时间 | O 89.17 H 89.25 L 88.97 C 88.97 | 6根5分钟K线</title><line x1="1135.5" y1="415.0" x2="1135.5" y2="432.8" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="1126.5" y="420.1" width="18.0" height="12.8" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-19 04:00 北京时间 | O 88.96 H 89.03 L 88.77 C 88.87 | 6根5分钟K线</title><line x1="1161.9" y1="429.0" x2="1161.9" y2="445.6" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="1152.9" y="433.5" width="18.0" height="5.7" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-19 04:30 北京时间 | O 88.83 H 88.94 L 88.76 C 88.76 | 6根5分钟K线</title><line x1="1188.3" y1="434.8" x2="1188.3" y2="446.2" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="1179.3" y="441.8" width="18.0" height="4.5" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-19 05:00 北京时间 | O 88.73 H 89.03 L 88.69 C 88.95 | 6根5分钟K线</title><line x1="1214.7" y1="429.0" x2="1214.7" y2="450.7" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="1205.7" y="434.1" width="18.0" height="14.0" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-19 05:30 北京时间 | O 88.93 H 88.94 L 88.67 C 88.68 | 6根5分钟K线</title><line x1="1241.1" y1="434.8" x2="1241.1" y2="452.0" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="1232.1" y="435.4" width="18.0" height="15.9" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-19 07:00 北京时间 | O 88.64 H 88.89 L 88.64 C 88.81 | 3根5分钟K线</title><line x1="1320.4" y1="437.9" x2="1320.4" y2="453.9" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="1311.4" y="443.0" width="18.0" height="10.8" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-19 07:30 北京时间 | O 88.88 H 88.88 L 88.73 C 88.73 | 5根5分钟K线</title><line x1="1346.8" y1="438.6" x2="1346.8" y2="448.1" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="1337.8" y="438.6" width="18.0" height="9.6" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<rect x="1025" y="69" width="335" height="25" rx="6" fill="#F8FAFC" stroke="#D8E1EA"/>
+<text x="1192.5" y="86" text-anchor="middle" class="small mono">最新30分钟  O 88.88  H 88.88  L 88.73  C 88.73</text>
+<text x="92" y="622" class="small">新闻时间点仅来自既有匹配结果；浅灰区域不作新闻归因。K线空缺时段留白。</text>
+<text x="1360" y="622" text-anchor="end" class="small">价格源：Yahoo Finance / BZ=F / 5m</text>
+<rect class="unmatched-band-hit" x="426.6" y="118.0" width="44.0" height="432.0" role="button" tabindex="0" focusable="true" data-event-key="event-20261118t1420-20261118t1510" aria-label="14:20–15:10，查看该时段重要新闻" fill="transparent"/><rect class="unmatched-band-hit" x="514.7" y="118.0" width="48.4" height="432.0" role="button" tabindex="0" focusable="true" data-event-key="event-20261118t1600-20261118t1655" aria-label="16:00–16:55，查看该时段重要新闻" fill="transparent"/><rect class="unmatched-band-hit" x="554.3" y="118.0" width="39.6" height="432.0" role="button" tabindex="0" focusable="true" data-event-key="event-20261118t1645-20261118t1730" aria-label="16:45–17:30，查看该时段重要新闻" fill="transparent"/><rect class="unmatched-band-hit" x="651.2" y="118.0" width="35.2" height="432.0" role="button" tabindex="0" focusable="true" data-event-key="event-20261118t1835-20261118t1915" aria-label="18:35–19:15，查看该时段重要新闻" fill="transparent"/><rect class="unmatched-band-hit" x="765.6" y="118.0" width="44.0" height="432.0" role="button" tabindex="0" focusable="true" data-event-key="event-20261118t2045-20261118t2135" aria-label="20:45–21:35，查看该时段重要新闻" fill="transparent"/><rect class="unmatched-band-hit" x="836.1" y="118.0" width="48.4" height="432.0" role="button" tabindex="0" focusable="true" data-event-key="event-20261118t2205-20261118t2300" aria-label="22:05–23:00，查看该时段重要新闻" fill="transparent"/><rect class="unmatched-band-hit" x="866.9" y="118.0" width="30.8" height="432.0" role="button" tabindex="0" focusable="true" data-event-key="event-20261118t2240-20261118t2315" aria-label="22:40–23:15，查看该时段重要新闻" fill="transparent"/><rect class="unmatched-band-hit" x="888.9" y="118.0" width="30.8" height="432.0" role="button" tabindex="0" focusable="true" data-event-key="event-20261118t2305-20261118t2340" aria-label="23:05–23:40，查看该时段重要新闻" fill="transparent"/><rect class="unmatched-band-hit" x="937.3" y="118.0" width="66.0" height="432.0" role="button" tabindex="0" focusable="true" data-event-key="event-20261119t0000-20261119t0115" aria-label="00:00–01:15，查看该时段重要新闻" fill="transparent"/><rect class="unmatched-band-hit" x="990.2" y="118.0" width="26.4" height="432.0" role="button" tabindex="0" focusable="true" data-event-key="event-20261119t0100-20261119t0130" aria-label="01:00–01:30，查看该时段重要新闻" fill="transparent"/><rect class="unmatched-band-hit" x="1082.6" y="118.0" width="35.2" height="432.0" role="button" tabindex="0" focusable="true" data-event-key="event-20261119t0245-20261119t0325" aria-label="02:45–03:25，查看该时段重要新闻" fill="transparent"/></svg></figure>
+<div id="related-news-panel" class="news-panel" aria-live="polite"><p class="news-panel-empty">点击上方K线图中的蓝色新闻时间点，查看该时段的相关新闻与市场解读。</p></div>
+<section class="summary-card" id="manual-review"><h2>人工时间线与价格口径复核</h2><p><strong>库存与夜间跌势</strong>。23:30原油库存增加338万桶，预期减少50万桶。23:05–23:40跌段已先开始，随后00:00–01:15再跌1.32%，与偏空库存意外方向一致，归因置信度中等。 <a href="https://flash.jin10.com/detail/20261118233003356800">金十原文</a></p><p><strong>正式结算口径</strong>。03:45金十报道Brent结算91.95美元、跌1.28%。Yahoo连续代码末价88.73美元，二者不能直接拼接为同一条价格序列。 <a href="https://flash.jin10.com/detail/20261119034526101800">金十原文</a></p><p><strong>其余异动</strong>。14:20、16:00、20:45及22:05起跌附近的船舶遇袭、炼厂袭击等消息，多数供应风险方向偏多，无法充分解释下跌。16:45、18:35、22:40、01:00、02:45附近反弹也缺乏充分先行证据，保留原因未确认。</p></section><section id="trump-card" class="trump-card"><h2>特朗普相关言论</h2>
+<article class="trump-statement" data-trump-statement="true">
+<div class="statement-meta">
+<time>2026-11-18 09:04:02 北京时间</time>
+<span class="topic-list">
+<span class="topic-chip">伊朗</span>
+</span>
+</div>
+<p class="statement-text">特朗普警告伊朗：若在华盛顿发动脏弹袭击，将付出“前所未有的代价”！ CNN披露，美国情报部门截获伊朗可能在华盛顿发动“脏弹”袭击的具体计划，涉及潜在地点和目标。特朗普警告，如果报道属实，伊朗将付出前所未有的代价，“没有任何国家曾经付出过这样的代价”。</p>
+<ul class="statement-sources">
+<li><a href="https://xnews.jin10.com/webapp/details.html?id=235374&amp;type=news&amp;data_type=0" target="_blank" rel="noopener noreferrer">特朗普警告伊朗：若在华盛顿发动脏弹袭击，将付出“前所未有的代价”！ ↗</a></li>
+</ul>
+</article>
+</section>
+<div class="summary-grid">
+<section id="iran-update-card" class="summary-card"><h2>ISW Iran Update</h2><ul>
+<li>原文发布日期：纽约时间 2026-11-17 22:54 / 北京时间 2026-11-18 11:54 <a href="https://understandingwar.org/research/middle-east/iran-update-november-17-2026/" target="_blank" rel="noopener noreferrer">查看ISW原文 ↗</a></li>
+<li data-isw-key-takeaway="true">伊朗政权近几日可能已向部分主要城市部署安全部队，以准备应对潜在反政府抗议。 <a href="https://understandingwar.org/research/middle-east/iran-update-november-17-2026/" target="_blank" rel="noopener noreferrer">查看ISW原文 ↗</a></li>
+<li data-isw-key-takeaway="true">伊拉克总理阿里·扎伊迪可能寻求与革命卫队圣城旅指挥官卡尼达成安排，促使真主党旅撤出朱尔夫萨赫尔，同时避免联邦政府与该亲伊民兵发生武装冲突。 <a href="https://understandingwar.org/research/middle-east/iran-update-november-17-2026/" target="_blank" rel="noopener noreferrer">查看ISW原文 ↗</a></li>
+<li data-isw-key-takeaway="true">美国打击格什姆岛伊朗防空设施期间，伊朗继续针对巴林境内的美军雷达系统发动攻击。 <a href="https://understandingwar.org/research/middle-east/iran-update-november-17-2026/" target="_blank" rel="noopener noreferrer">查看ISW原文 ↗</a></li>
+<li data-isw-key-takeaway="true">胡塞武装继续宣称曼德海峡对国际交通开放，但其自11月15日以来在红海沿岸和亚丁湾取得的领土进展，可能使其更容易袭击国际航运。 <a href="https://understandingwar.org/research/middle-east/iran-update-november-17-2026/" target="_blank" rel="noopener noreferrer">查看ISW原文 ↗</a></li>
+<li data-isw-key-takeaway="true">也门政府阵营继续声称在焦夫和马里卜西北部推进，目标朝向焦夫省会哈兹姆。 <a href="https://understandingwar.org/research/middle-east/iran-update-november-17-2026/" target="_blank" rel="noopener noreferrer">查看ISW原文 ↗</a></li>
+<li data-isw-key-takeaway="true">胡塞武装声称11月16日至17日打击沙特关键基础设施及预警雷达，意在迫使沙特停止在也门的军事行动并接受其要求。 <a href="https://understandingwar.org/research/middle-east/iran-update-november-17-2026/" target="_blank" rel="noopener noreferrer">查看ISW原文 ↗</a></li>
+</ul></section>
+<section id="tracking-card" class="summary-card"><h2>今日关注什么</h2><ul>
+<li>霍尔木兹海峡是否继续通行，以及是否出现收费、封锁或护航安排变化；</li>
+<li>油轮、港口和AIS船位变化，包括停航、绕航、遭袭、排队和装船节奏；</li>
+<li>制裁、豁免和出口政策是否出现新的官方文件或执行变化；</li>
+<li>OPEC+及主要产油国政策是否出现产量、配额或官方售价调整；</li>
+<li>地区冲突是否升级或缓和，重点跟踪军事行动与关键设施安全；</li>
+<li>EIA/API库存或其他重要供需数据是否改变短线供需判断；</li>
+<li>当天ISW Iran Update最值得跟踪的事项：伊朗政权近几日可能已向部分主要城市部署安全部队，以准备应对潜在反政府抗议。</li>
+</ul></section></div>
+<div class="audit-link"><a href="Jin10_Brent_Rolling_Audit_20261119_0800.html">查看完整 Audit →</a></div>
+<script type="application/json" id="brent-event-data">[{"key":"event-20261119t0000-20261119t0115","kind":"explained","start":"2026-11-19 00:00","end":"2026-11-19 01:15","time_range":"北京时间 00:00–01:15","direction":"下跌","cumulative":"-1.32%","max_30m":"-1.06%","pct_5m":"-0.06%","pct_15m":"-0.08%","pct_30m":"-0.58%","pct_60m":"-1.64%","news":[{"time":"N/A","title":"1. EIA报告：11月13日当周美国原油出口增加103.3万桶/日至448.8万桶/日。 2. EIA报告：11月13日当周美国国内原油产量增加1.9万桶至1403.2万桶/日。 3. EIA报告：除却战略储备的商业原油库存增...","url":"https://flash.jin10.com/detail/20261118233056495800","relation":"新闻先于价格","freshness":"新增事实","judgment":"暂无法确认","confidence":"低"}],"interpretation":"已有部分价格数据，但暂时无法确认价格反应。","judgment":"暂无法确认","confidence":"低"},{"key":"event-20261118t1420-20261118t1510","kind":"unexplained","start":"2026-11-18 14:20","end":"2026-11-18 15:10","time_range":"北京时间 14:20–15:10","direction":"下跌","cumulative":"-0.90%","max_30m":"-0.66%","pct_5m":"-0.19%","pct_15m":"-0.30%","pct_30m":"-0.66%","pct_60m":"-0.93%","news":[{"time":"2026-11-18 14:36","title":"阿布扎比国家石油公司：在霍尔木兹海峡发生的袭击中，一名船员失踪，11人受伤。","url":"https://flash.jin10.com/detail/20261118143624411800","relation":"同期发生","freshness":"新增事实","judgment":"相关背景，未作价格归因","confidence":"低"},{"time":"2026-11-18 14:36","title":"阿联酋阿布扎比国家石油公司物流与服务部门确认，其一艘船舶于2026年11月17日晚间在通过霍尔木兹海峡时遭到袭击。目前仍有1名船员失联，相关搜救行动正在与有关当局协调进行。其余所有船员均已安全撤离该船。共有11名船员受伤，其中需...","url":"https://flash.jin10.com/detail/20261118143634888800","relation":"同期发生","freshness":"新增事实","judgment":"相关背景，未作价格归因","confidence":"低"}],"interpretation":"","judgment":"相关背景，未作价格归因","confidence":"低"},{"key":"event-20261118t1600-20261118t1655","kind":"unexplained","start":"2026-11-18 16:00","end":"2026-11-18 16:55","time_range":"北京时间 16:00–16:55","direction":"下跌","cumulative":"-3.00%","max_30m":"-2.85%","pct_5m":"+0.17%","pct_15m":"+0.11%","pct_30m":"-2.85%","pct_60m":"-3.07%","news":[{"time":"2026-11-18 16:47","title":"据知情人士透露，作为新一轮制裁方案的一部分，欧盟将提议禁止俄罗斯前作战人员进入欧盟境内。签证禁令将成为欧盟针对俄罗斯所实施的最新制裁方案的核心内容。知情人士称，欧盟委员会计划提出的其他限制措施还包括：针对多家银行、数字货币服务提...","url":"https://flash.jin10.com/detail/20261118164738785800","relation":"同期发生","freshness":"新增事实","judgment":"相关背景，未作价格归因","confidence":"低"},{"time":"2026-11-18 15:46","title":"据外媒报道，在沙特与胡塞武装最新一轮冲突升级中，由沙特领导的也门联军对胡塞武装发动了大规模袭击。联军发言人周三发文称，沙特支持的部队袭击了也门首都萨那、红海沿岸的荷台达，以及阿姆兰省和萨达省的60个军事目标，旨在“削弱胡塞武装的...","url":"https://flash.jin10.com/detail/20261118154636606800","relation":"新闻先于价格","freshness":"新增事实","judgment":"相关背景，未作价格归因","confidence":"低"}],"interpretation":"","judgment":"相关背景，未作价格归因","confidence":"低"},{"key":"event-20261118t1645-20261118t1730","kind":"unexplained","start":"2026-11-18 16:45","end":"2026-11-18 17:30","time_range":"北京时间 16:45–17:30","direction":"上涨","cumulative":"+0.87%","max_30m":"+0.63%","pct_5m":"+0.12%","pct_15m":"+0.20%","pct_30m":"+0.63%","pct_60m":"+0.81%","news":[{"time":"2026-11-18 17:11","title":"挪威国家石油公司：没有迹象表明此次袭击对员工、合作伙伴或供应商造成影响，生产未受影响。","url":"https://flash.jin10.com/detail/20261118171145880800","relation":"同期发生","freshness":"新增事实","judgment":"相关背景，未作价格归因","confidence":"低"},{"time":"2026-11-18 17:12","title":"挪威国家石油公司：正与当局合作，努力消除网络攻击影响并恢复系统。","url":"https://flash.jin10.com/detail/20261118171208752800","relation":"同期发生","freshness":"新增事实","judgment":"相关背景，未作价格归因","confidence":"低"}],"interpretation":"","judgment":"相关背景，未作价格归因","confidence":"低"},{"key":"event-20261118t1835-20261118t1915","kind":"unexplained","start":"2026-11-18 18:35","end":"2026-11-18 19:15","time_range":"北京时间 18:35–19:15","direction":"上涨","cumulative":"+0.53%","max_30m":"+0.51%","pct_5m":"+0.08%","pct_15m":"+0.02%","pct_30m":"+0.51%","pct_60m":"+0.58%","news":[],"interpretation":"","judgment":"暂无法确认","confidence":"低"},{"key":"event-20261118t2045-20261118t2135","kind":"unexplained","start":"2026-11-18 20:45","end":"2026-11-18 21:35","time_range":"北京时间 20:45–21:35","direction":"下跌","cumulative":"-0.56%","max_30m":"-0.58%","pct_5m":"-0.01%","pct_15m":"-0.01%","pct_30m":"-0.58%","pct_60m":"-0.66%","news":[{"time":"2026-11-18 21:16","title":"据两名获悉沙特相关计划的西方官员透露，沙特正准备将针对也门胡塞武装的战争持续到明年，尽管在也门战场遭遇挫折，且该国国内生活也因胡塞武装的袭击而受到干扰，但沙特仍决定加大投入。这场重燃的冲突已成为伊朗相关局势中最活跃的战线，在也门...","url":"https://flash.jin10.com/detail/20261118211636220800","relation":"同期发生","freshness":"新增事实","judgment":"相关背景，未作价格归因","confidence":"低"},{"time":"2026-11-18 20:32","title":"乌克兰军方：袭击了俄罗斯的伊尔斯基和阿菲普斯基炼油厂。","url":"https://flash.jin10.com/detail/20261118203224460800","relation":"新闻先于价格","freshness":"新增事实","judgment":"相关背景，未作价格归因","confidence":"低"}],"interpretation":"","judgment":"相关背景，未作价格归因","confidence":"低"},{"key":"event-20261118t2205-20261118t2300","kind":"unexplained","start":"2026-11-18 22:05","end":"2026-11-18 23:00","time_range":"北京时间 22:05–23:00","direction":"下跌","cumulative":"-1.01%","max_30m":"-0.57%","pct_5m":"-0.02%","pct_15m":"-0.14%","pct_30m":"-0.57%","pct_60m":"-0.72%","news":[{"time":"2026-11-18 23:01","title":"乌克兰国家石油天然气公司首席执行官称，俄罗斯袭击了该公司位于波尔塔瓦州的设施。","url":"https://flash.jin10.com/detail/20261118230124375800","relation":"价格先于新闻","freshness":"新增事实","judgment":"相关背景，未作价格归因","confidence":"低"}],"interpretation":"","judgment":"相关背景，未作价格归因","confidence":"低"},{"key":"event-20261118t2240-20261118t2315","kind":"unexplained","start":"2026-11-18 22:40","end":"2026-11-18 23:15","time_range":"北京时间 22:40–23:15","direction":"上涨","cumulative":"+0.40%","max_30m":"+0.56%","pct_5m":"-0.35%","pct_15m":"-0.01%","pct_30m":"+0.56%","pct_60m":"+0.00%","news":[],"interpretation":"","judgment":"暂无法确认","confidence":"低"},{"key":"event-20261118t2305-20261118t2340","kind":"unexplained","start":"2026-11-18 23:05","end":"2026-11-18 23:40","time_range":"北京时间 23:05–23:40","direction":"下跌","cumulative":"-0.39%","max_30m":"-0.54%","pct_5m":"+0.17%","pct_15m":"-0.36%","pct_30m":"-0.54%","pct_60m":"-0.44%","news":[{"time":"2026-11-18 23:30","title":"当周EIA原油库存","url":"https://flash.jin10.com/detail/20261118233001352800","relation":"同期发生","freshness":"新增事实","judgment":"相关背景，未作价格归因","confidence":"低"},{"time":"2026-11-18 23:30","title":"美国至11月13日当周EIA原油库存 338万桶，预期-50万桶，前值465.7万桶。","url":"https://flash.jin10.com/detail/20261118233003356800","relation":"同期发生","freshness":"新增事实","judgment":"相关背景，未作价格归因","confidence":"低"}],"interpretation":"","judgment":"相关背景，未作价格归因","confidence":"低"},{"key":"event-20261119t0100-20261119t0130","kind":"unexplained","start":"2026-11-19 01:00","end":"2026-11-19 01:30","time_range":"北京时间 01:00–01:30","direction":"上涨","cumulative":"+0.81%","max_30m":"+0.81%","pct_5m":"+0.42%","pct_15m":"+0.32%","pct_30m":"+0.81%","pct_60m":"+0.78%","news":[],"interpretation":"","judgment":"暂无法确认","confidence":"低"},{"key":"event-20261119t0245-20261119t0325","kind":"unexplained","start":"2026-11-19 02:45","end":"2026-11-19 03:25","time_range":"北京时间 02:45–03:25","direction":"上涨","cumulative":"+0.77%","max_30m":"+0.53%","pct_5m":"+0.20%","pct_15m":"+0.31%","pct_30m":"+0.53%","pct_60m":"+0.77%","news":[],"interpretation":"","judgment":"暂无法确认","confidence":"低"}]</script>
+<script type="application/json" id="brent-panel-data">{"presentation_available":true,"panel_groups":[{"key":"event-20261118t1420-20261118t1510","time_range":"14:20–15:10","direction":"下跌","cumulative":"-0.90%","pct_5m":"-0.19%","pct_15m":"-0.30%","pct_30m":"-0.66%","pct_60m":"-0.93%","max_30m":"-0.69%","is_unexplained":true,"interpretation":"新闻发布在本轮价格异动展开一段时间之后，更适合作为后续背景或确认，不能解释整段行情。","news":[]},{"key":"event-20261118t1600-20261118t1655","time_range":"16:00–16:55","direction":"下跌","cumulative":"-3.00%","pct_5m":"+0.17%","pct_15m":"+0.11%","pct_30m":"-2.85%","pct_60m":"-3.07%","max_30m":"-3.60%","is_unexplained":true,"interpretation":"新闻发布在本轮价格异动展开一段时间之后，更适合作为后续背景或确认，不能解释整段行情。","news":[]},{"key":"event-20261118t1645-20261118t1730","time_range":"16:45–17:30","direction":"上涨","cumulative":"+0.87%","pct_5m":"+0.12%","pct_15m":"+0.20%","pct_30m":"+0.63%","pct_60m":"+0.81%","max_30m":"+0.66%","is_unexplained":true,"interpretation":"新闻理论方向为中性或无法判断，不能作为该段Brent异动的驱动因素。","news":[]},{"key":"event-20261118t1835-20261118t1915","time_range":"18:35–19:15","direction":"上涨","cumulative":"+0.53%","pct_5m":"+0.08%","pct_15m":"+0.02%","pct_30m":"+0.51%","pct_60m":"+0.58%","max_30m":"+0.51%","is_unexplained":true,"interpretation":"已有部分价格数据，但暂时无法确认价格反应。","news":[]},{"key":"event-20261118t2045-20261118t2135","time_range":"20:45–21:35","direction":"下跌","cumulative":"-0.56%","pct_5m":"-0.01%","pct_15m":"-0.01%","pct_30m":"-0.58%","pct_60m":"-0.66%","max_30m":"-0.68%","is_unexplained":true,"interpretation":"新闻发布在本轮价格异动展开一段时间之后，更适合作为后续背景或确认，不能解释整段行情。","news":[]},{"key":"event-20261118t2205-20261118t2300","time_range":"22:05–23:00","direction":"下跌","cumulative":"-1.01%","pct_5m":"-0.02%","pct_15m":"-0.14%","pct_30m":"-0.57%","pct_60m":"-0.72%","max_30m":"-1.26%","is_unexplained":true,"interpretation":"新闻理论方向为中性或无法判断，不能作为该段Brent异动的驱动因素。","news":[]},{"key":"event-20261118t2240-20261118t2315","time_range":"22:40–23:15","direction":"上涨","cumulative":"+0.40%","pct_5m":"-0.35%","pct_15m":"-0.01%","pct_30m":"+0.56%","pct_60m":"+0.00%","max_30m":"+0.75%","is_unexplained":true,"interpretation":"新闻理论方向为中性或无法判断，不能作为该段Brent异动的驱动因素。","news":[]},{"key":"event-20261118t2305-20261118t2340","time_range":"23:05–23:40","direction":"下跌","cumulative":"-0.39%","pct_5m":"+0.17%","pct_15m":"-0.36%","pct_30m":"-0.54%","pct_60m":"-0.44%","max_30m":"-0.56%","is_unexplained":true,"interpretation":"已有部分价格数据，但暂时无法确认价格反应。","news":[]},{"key":"event-20261119t0000-20261119t0115","time_range":"00:00–01:15","direction":"下跌","cumulative":"-1.32%","pct_5m":"-0.06%","pct_15m":"-0.08%","pct_30m":"-0.58%","pct_60m":"-1.64%","max_30m":"-1.06%","is_unexplained":false,"interpretation":"已有部分价格数据，但暂时无法确认价格反应。","news":[]},{"key":"event-20261119t0100-20261119t0130","time_range":"01:00–01:30","direction":"上涨","cumulative":"+0.81%","pct_5m":"+0.42%","pct_15m":"+0.32%","pct_30m":"+0.81%","pct_60m":"+0.78%","max_30m":"+0.81%","is_unexplained":true,"interpretation":"未直接涉及原油或能源供应端变化，不能作为Brent短线核心驱动。","news":[]},{"key":"event-20261119t0245-20261119t0325","time_range":"02:45–03:25","direction":"上涨","cumulative":"+0.77%","pct_5m":"+0.20%","pct_15m":"+0.31%","pct_30m":"+0.53%","pct_60m":"+0.77%","max_30m":"+0.55%","is_unexplained":true,"interpretation":"新闻理论方向为中性或无法判断，不能作为该段Brent异动的驱动因素。","news":[]}],"unmatched_major_items":[{"id":"20261118143624411800","time":"2026-11-18 14:36","title":"阿布扎比国家石油公司：在霍尔木兹海峡发生的袭击中，一名船员失踪，11人受伤。","summary":"阿布扎比国家石油公司：在霍尔木兹海峡发生的袭击中，一名船员失踪，11人受伤。","url":"https://flash.jin10.com/detail/20261118143624411800","impact":"暂未发现可直接匹配的Brent显著异动，需持续关注后续影响。","price_status":"未匹配显著异动","relation":"未匹配显著异动","judgment":"⚠ 重大事件","confidence":"低","reaction_status":"UNCONFIRMED","reaction_status_note":"","event_group_id":"event_group_001","role":"primary","destinations":["⚠ 重大事件"]},{"id":"20261118153043340800","time":"2026-11-18 15:30","title":"澳大利亚最大LNG出口州获豁免，不受天然气储备新规约束","summary":"【澳大利亚最大LNG出口州获豁免，不受天然气储备新规约束】金十数据11月18日讯，澳大利亚最大的液化天然气（LNG）出口州西澳大利亚州州长周三表示，联邦政府已同意该州豁免于一项天然气储备计划。根据该计划，天然气出口商必须将20%的产量留给...","url":"https://flash.jin10.com/detail/20261118153043340800","impact":"暂未发现可直接匹配的Brent显著异动，需持续关注后续影响。","price_status":"未匹配显著异动","relation":"未匹配显著异动","judgment":"⚠ 重大事件","confidence":"低","reaction_status":"UNCONFIRMED","reaction_status_note":"","event_group_id":"event_group_002","role":"primary","destinations":["⚠ 重大事件"]},{"id":"20261118154636606800","time":"2026-11-18 15:46","title":"沙特领导的联军加大对胡塞武装的袭击力度","summary":"【沙特领导的联军加大对胡塞武装的袭击力度】金十数据11月18日讯，据外媒报道，在沙特与胡塞武装最新一轮冲突升级中，由沙特领导的也门联军对胡塞武装发动了大规模袭击。联军发言人周三发文称，沙特支持的部队袭击了也门首都萨那、红海沿岸的荷台达，以...","url":"https://flash.jin10.com/detail/20261118154636606800","impact":"暂未发现可直接匹配的Brent显著异动，需持续关注后续影响。","price_status":"未匹配显著异动","relation":"未匹配显著异动","judgment":"⚠ 重大事件","confidence":"低","reaction_status":"UNCONFIRMED","reaction_status_note":"","event_group_id":"event_group_003","role":"primary","destinations":["⚠ 重大事件"]},{"id":"20261118164738785800","time":"2026-11-18 16:47","title":"欧盟拟禁止俄罗斯退役军人入境，签证禁令成新一轮制裁核心","summary":"【欧盟拟禁止俄罗斯退役军人入境，签证禁令成新一轮制裁核心】金十数据11月18日讯，据知情人士透露，作为新一轮制裁方案的一部分，欧盟将提议禁止俄罗斯前作战人员进入欧盟境内。签证禁令将成为欧盟针对俄罗斯所实施的最新制裁方案的核心内容。知情人士...","url":"https://flash.jin10.com/detail/20261118164738785800","impact":"暂未发现可直接匹配的Brent显著异动，需持续关注后续影响。","price_status":"未匹配显著异动","relation":"未匹配显著异动","judgment":"⚠ 重大事件","confidence":"低","reaction_status":"UNCONFIRMED","reaction_status_note":"","event_group_id":"event_group_004","role":"primary","destinations":["⚠ 重大事件"]},{"id":"20261118174341350800","time":"2026-11-18 17:43","title":"英国海事贸易组织：收到关于阿曼海塞卜以北13海里处发生事件的延迟报道。一艘油轮在霍尔木兹海峡内被炮弹击中。","summary":"英国海事贸易组织：收到关于阿曼海塞卜以北13海里处发生事件的延迟报道。一艘油轮在霍尔木兹海峡内被炮弹击中。","url":"https://flash.jin10.com/detail/20261118174341350800","impact":"暂未发现可直接匹配的Brent显著异动，需持续关注后续影响。","price_status":"未匹配显著异动","relation":"未匹配显著异动","judgment":"⚠ 重大事件","confidence":"低","reaction_status":"UNCONFIRMED","reaction_status_note":"","event_group_id":"event_group_005","role":"primary","destinations":["⚠ 重大事件"]},{"id":"20261118211636220800","time":"2026-11-18 21:16","title":"西方官员：沙特预计与胡塞武装的冲突将持续至明年","summary":"【西方官员：沙特预计与胡塞武装的冲突将持续至明年】金十数据11月18日讯，据两名获悉沙特相关计划的西方官员透露，沙特正准备将针对也门胡塞武装的战争持续到明年，尽管在也门战场遭遇挫折，且该国国内生活也因胡塞武装的袭击而受到干扰，但沙特仍决定...","url":"https://flash.jin10.com/detail/20261118211636220800","impact":"暂未发现可直接匹配的Brent显著异动，需持续关注后续影响。","price_status":"未匹配显著异动","relation":"未匹配显著异动","judgment":"⚠ 重大事件","confidence":"低","reaction_status":"UNCONFIRMED","reaction_status_note":"","event_group_id":"event_group_006","role":"primary","destinations":["⚠ 重大事件"]},{"id":"20261118233001352800","time":"2026-11-18 23:30","title":"当周EIA原油库存","summary":"当周EIA原油库存","url":"https://flash.jin10.com/detail/20261118233001352800","impact":"暂未发现可直接匹配的Brent显著异动，需持续关注后续影响。","price_status":"未匹配显著异动","relation":"未匹配显著异动","judgment":"⚠ 重大事件","confidence":"低","reaction_status":"UNCONFIRMED","reaction_status_note":"","event_group_id":"event_group_007","role":"primary","destinations":["⚠ 重大事件"]},{"id":"20261118233003356800","time":"2026-11-18 23:30","title":"美国至11月13日当周EIA原油库存 338万桶，预期-50万桶，前值465.7万桶。","summary":"美国至11月13日当周EIA原油库存 338万桶，预期-50万桶，前值465.7万桶。","url":"https://flash.jin10.com/detail/20261118233003356800","impact":"暂未发现可直接匹配的Brent显著异动，需持续关注后续影响。","price_status":"未匹配显著异动","relation":"未匹配显著异动","judgment":"⚠ 重大事件","confidence":"低","reaction_status":"UNCONFIRMED","reaction_status_note":"","event_group_id":"event_group_007","role":"material_escalation","destinations":["⚠ 重大事件"]},{"id":"20261118233003357801","time":"2026-11-18 23:30","title":"美国至11月13日当周EIA汽油库存 519.2万桶，预期160万桶，前值179.9万桶。","summary":"美国至11月13日当周EIA汽油库存 519.2万桶，预期160万桶，前值179.9万桶。","url":"https://flash.jin10.com/detail/20261118233003357801","impact":"暂未发现可直接匹配的Brent显著异动，需持续关注后续影响。","price_status":"未匹配显著异动","relation":"未匹配显著异动","judgment":"⚠ 重大事件","confidence":"低","reaction_status":"UNCONFIRMED","reaction_status_note":"","event_group_id":"event_group_008","role":"primary","destinations":["⚠ 重大事件"]},{"id":"20261119044354326800","time":"2026-11-19 04:43","title":"伊朗议会副议长：若伊朗不能出口石油 那地区其他国家也不应出口","summary":"【伊朗议会副议长：若伊朗不能出口石油 那地区其他国家也不应出口】金十数据11月19日讯，据塔斯尼姆通讯社报道，伊朗议会副议长哈吉·巴巴埃表示，地区能源安全是相互关联的。他表示，如果伊朗无法出口石油，地区其他国家也不应出口石油。不能接受伊朗...","url":"https://flash.jin10.com/detail/20261119044354326800","impact":"暂未发现可直接匹配的Brent显著异动，需持续关注后续影响。","price_status":"未匹配显著异动","relation":"未匹配显著异动","judgment":"⚠ 重大事件","confidence":"低","reaction_status":"UNCONFIRMED","reaction_status_note":"","event_group_id":"event_group_009","role":"primary","destinations":["⚠ 重大事件"]}],"all_day_items":[],"display_summary":{"displayed_news_count":10,"event_group_count":9,"primary_count":9,"material_escalation_count":1,"merged_count":5,"over_30_reason":"","text":"今日展示 10 条重要新闻：9 个独立事件，1 条实质升级；均为通过硬条件的独立事实，未为凑数量加入弱相关新闻。"}}</script>
+</main>
+<script>
+(() => {
+  const panel = document.getElementById('related-news-panel');
+  const panelDataNode = document.getElementById('brent-panel-data');
+  if (!panel || !panelDataNode) return;
+  let panelData = {};
+  try { panelData = JSON.parse(panelDataNode.textContent || '{}'); } catch (error) { panelData = {}; }
+  const panelGroups = Array.isArray(panelData.panel_groups) ? panelData.panel_groups : [];
+  const unmatchedMajorItems = Array.isArray(panelData.unmatched_major_items) ? panelData.unmatched_major_items : [];
+  const allDayItems = Array.isArray(panelData.all_day_items) ? panelData.all_day_items : [];
+  const displaySummary = panelData.display_summary && typeof panelData.display_summary === 'object' ? panelData.display_summary : {};
+  const addText = (tag, className, value) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    node.textContent = value || '';
+    return node;
+  };
+  const validJin10Url = (value) => {
+    try {
+      const url = new URL(String(value || ''));
+      return (url.protocol === 'http:' || url.protocol === 'https:')
+        && (url.hostname === 'jin10.com' || url.hostname.endsWith('.jin10.com')) ? url.href : '';
+    } catch (error) {
+      return '';
+    }
+  };
+  const appendNews = (news, attributionLabel = '') => {
+    const entry = document.createElement('article');
+    entry.className = 'news-entry';
+    entry.appendChild(addText('div', 'news-time', (news.time || 'N/A') + ' 北京时间'));
+    entry.appendChild(addText('h5', 'news-title', news.title || '重大新闻'));
+    if (news.summary) entry.appendChild(addText('p', 'news-meta', news.summary));
+    entry.appendChild(addText('p', 'news-meta', '影响说明：' + (news.impact || 'N/A')));
+    entry.appendChild(addText('p', 'news-meta', '价格状态：' + (news.price_status || 'N/A')));
+    entry.appendChild(addText('p', 'news-meta', '反应状态：' + (news.reaction_status || 'UNCONFIRMED')));
+    if (news.reaction_status_note) entry.appendChild(addText('p', 'news-meta', news.reaction_status_note));
+    if (attributionLabel) entry.appendChild(addText('p', 'attribution-line', attributionLabel));
+    const url = validJin10Url(news.url);
+    if (url) {
+      const link = document.createElement('a');
+      link.className = 'news-source-link';
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = '查看金十原文 ↗';
+      entry.appendChild(link);
+    }
+    panel.appendChild(entry);
+  };
+  const appendGroup = (group) => {
+    panel.appendChild(addText('h4', 'news-list-heading', (group.time_range || '价格异动') + '｜Brent' + (group.direction || '') + ' ' + (group.cumulative || '')));
+    const summary = document.createElement('div');
+    summary.className = 'event-summary';
+    summary.appendChild(addText('span', '', group.max_30m === 'N/A' ? '最大30分钟：N/A' : '最大30分钟涨跌幅：' + (group.max_30m || 'N/A')));
+    panel.appendChild(summary);
+    const reactions = document.createElement('div');
+    reactions.className = 'event-reactions';
+    [['5分钟', group.pct_5m], ['15分钟', group.pct_15m], ['30分钟', group.pct_30m], ['60分钟', group.pct_60m], ['本轮累计', group.cumulative]].forEach(([label, value]) => {
+      const card = document.createElement('div');
+      card.className = 'event-reaction';
+      card.appendChild(addText('span', '', label));
+      card.appendChild(addText('strong', '', value || 'N/A'));
+      reactions.appendChild(card);
+    });
+    panel.appendChild(reactions);
+    const news = Array.isArray(group.news) ? group.news : [];
+    if (group.is_unexplained) {
+      panel.appendChild(addText('p', 'unexplained-message', news.length
+        ? '该段波动原因暂无法确认；以下新闻仅作相关背景，不作价格归因。'
+        : '暂未找到符合条件的金十新闻，原因暂无法确认，需人工继续核查。'));
+    } else if (group.interpretation) {
+      panel.appendChild(addText('p', 'market-interpretation', group.interpretation));
+    }
+    panel.appendChild(addText('h4', 'news-list-heading', group.is_unexplained ? '该时段相关背景（未作价格归因）' : '该时段重要新闻'));
+    if (news.length) news.forEach((item) => appendNews(item, group.is_unexplained ? '相关背景，未作价格归因' : ''));
+    else panel.appendChild(addText('p', 'unexplained-message', '暂未找到符合条件的金十新闻，原因暂无法确认，需人工继续核查。'));
+  };
+  const appendUnmatchedMajorItems = () => {
+    if (!unmatchedMajorItems.length) return;
+    panel.appendChild(addText('h4', 'news-list-heading', '⚠ 重大事件'));
+    unmatchedMajorItems.forEach(appendNews);
+  };
+  const panelByKey = new Map(panelGroups.map((group) => [group.key, group]));
+  const triggers = [...document.querySelectorAll('[data-event-key]')];
+  const clearActive = () => triggers.forEach((item) => item.classList.remove('is-active'));
+  const renderAllDay = () => {
+    clearActive();
+    panel.replaceChildren();
+    panel.appendChild(addText('h3', 'news-panel-title', '全日重要新闻'));
+    if (displaySummary.text) panel.appendChild(addText('p', 'news-display-summary', displaySummary.text));
+    if (allDayItems.length) allDayItems.forEach(appendNews);
+    else if (!unmatchedMajorItems.length) panel.appendChild(addText('p', 'unexplained-message', '本窗口暂无符合展示口径的新闻。'));
+    appendUnmatchedMajorItems();
+  };
+  const buildAllDayButton = () => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'all-day-button';
+    button.textContent = '查看全日重要新闻';
+    button.addEventListener('click', renderAllDay);
+    return button;
+  };
+  const showGroup = (key) => {
+    const group = panelByKey.get(key);
+    if (!group) return;
+    clearActive();
+    triggers.filter((item) => item.getAttribute('data-event-key') === key).forEach((item) => item.classList.add('is-active'));
+    panel.replaceChildren();
+    panel.appendChild(buildAllDayButton());
+    appendGroup(group);
+  };
+  if (panelData.presentation_available) {
+    triggers.forEach((trigger) => {
+      const show = () => showGroup(trigger.getAttribute('data-event-key') || '');
+      trigger.addEventListener('click', show);
+      trigger.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          show();
+        }
+      });
+    });
+    renderAllDay();
+    return;
+  }
+  const dataNode = document.getElementById('brent-event-data');
+  if (!dataNode) return;
+  let events = [];
+  try { events = JSON.parse(dataNode.textContent || '[]'); } catch (error) { events = []; }
+  const byKey = new Map(events.map((item) => [item.key, item]));
+  const showEvent = (trigger) => {
+    const item = byKey.get(trigger.getAttribute('data-event-key') || '');
+    if (!item) return;
+    clearActive();
+    trigger.classList.add('is-active');
+    panel.replaceChildren();
+    const heading = addText('h3', 'news-panel-title', item.time_range + '｜Brent' + item.direction + ' ' + item.cumulative);
+    panel.appendChild(heading);
+    if(item.kind==='unexplained'){
+      const backgroundNews = Array.isArray(item.news) ? item.news : [];
+      panel.appendChild(addText('p', 'unexplained-message', backgroundNews.length
+        ? '该段波动原因暂无法确认；以下新闻仅作相关背景，不作价格归因。'
+        : '暂未找到符合条件的金十新闻，原因暂无法确认，需人工继续核查。'));
+      panel.appendChild(addText('p', 'attribution-line', '归因：暂无法确认｜置信度：低'));
+      if (backgroundNews.length) {
+        panel.appendChild(addText('h4', 'news-list-heading', '该时段相关背景（未作价格归因）'));
+        backgroundNews.forEach((news) => {
+          const entry = document.createElement('article');
+          entry.className = 'news-entry';
+          entry.appendChild(addText('div', 'news-time', (news.time || 'N/A') + ' 北京时间'));
+          const title = document.createElement('a');
+          title.className = 'news-title';
+          title.href = news.url;
+          title.target = '_blank';
+          title.rel = 'noopener noreferrer';
+          title.textContent = news.title;
+          entry.appendChild(title);
+          entry.appendChild(addText('p', 'news-meta', '时间关系：' + news.relation + '｜信息新鲜度：' + news.freshness));
+          entry.appendChild(addText('p', 'attribution-line', '相关背景，未作价格归因'));
+          panel.appendChild(entry);
+        });
+      }
+      return;
+    }
+    const summary=document.createElement('div');
+    summary.className = 'event-summary';
+    summary.appendChild(addText('span', '', item.max_30m === 'N/A' ? '最大30分钟：N/A' : '最大30分钟涨跌幅：' + item.max_30m));
+    panel.appendChild(summary);
+    const reactions = document.createElement('div');
+    reactions.className = 'event-reactions';
+    [['5分钟', item.pct_5m], ['15分钟', item.pct_15m], ['30分钟', item.pct_30m], ['60分钟', item.pct_60m], ['本轮累计', item.cumulative]].forEach(([label, value]) => {
+      const card = document.createElement('div');
+      card.className = 'event-reaction';
+      card.appendChild(addText('span', '', label));
+      card.appendChild(addText('strong', '', value));
+      reactions.appendChild(card);
+    });
+    panel.appendChild(reactions);
+    panel.appendChild(addText('h4', 'news-list-heading', '该时段正式入选新闻'));
+    item.news.forEach((news, index) => {
+      const entry = document.createElement('article');
+      entry.className = 'news-entry';
+      if (index >= 2) entry.hidden = true;
+      entry.appendChild(addText('div', 'news-time', (news.time || 'N/A') + ' 北京时间'));
+      const title = document.createElement('a');
+      title.className = 'news-title';
+      title.href = news.url;
+      title.target = '_blank';
+      title.rel = 'noopener noreferrer';
+      title.textContent = news.title;
+      entry.appendChild(title);
+      entry.appendChild(addText('p', 'news-meta', '时间关系：' + news.relation + '｜信息新鲜度：' + news.freshness));
+      const link = document.createElement('a');
+      link.className = 'news-source-link';
+      link.href = news.url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = '查看金十原文 ↗';
+      entry.appendChild(link);
+      panel.appendChild(entry);
+    });
+    if (item.news.length > 2) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'news-expand';
+      button.textContent = '展开全部';
+      button.addEventListener('click', () => {
+        const hidden = button.textContent === '展开全部';
+        panel.querySelectorAll('.news-entry').forEach((entry, index) => {
+          if (index >= 2) entry.hidden = !hidden;
+        });
+        button.textContent = hidden ? '收起' : '展开全部';
+      });
+      panel.appendChild(button);
+    }
+    if (item.interpretation) panel.appendChild(addText('p', 'market-interpretation', item.interpretation));
+    panel.appendChild(addText('p', 'attribution-line', '归因：' + item.judgment + '｜置信度：' + item.confidence));
+  };
+  triggers.forEach((trigger) => {
+    trigger.addEventListener('click', () => showEvent(trigger));
+    trigger.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        showEvent(trigger);
+      }
+    });
+  });
+})();
+</script>
+</body></html>

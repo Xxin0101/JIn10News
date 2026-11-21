@@ -6676,10 +6676,9 @@ def _parse_formal_dashboard(
         "forecast": dict(presentation.forecast or {}) if presentation else {},
         "price_layer": dict(presentation.price_layer or {}) if presentation else {},
         "research_sections": {
-            heading: _formal_section(lines, heading, ())
+            heading: [line for line in _formal_section(lines, heading, ()) if line.strip() != audit_link]
             for heading in (EVIDENCE_HEADING, OUTLOOK_HEADING)
         },
-        "sample_data": SAMPLE_NOTICE in text,
         "trump_items": (
             list(presentation.trump_items)
             if presentation and presentation.trump_items
@@ -6942,8 +6941,6 @@ def _embedded_chart_html(
 
 def _formal_dashboard_body(markdown_path: Path, dashboard: dict[str, object]) -> list[str]:
     lines = [f'<main class="report-shell"><h1>{_inline_markdown_html(str(dashboard["title"]))}</h1>']
-    if dashboard.get("sample_data"):
-        lines.append(f'<blockquote>{SAMPLE_NOTICE}</blockquote>')
     summary_heading = "今日总结" if dashboard.get("forecast") else "今日重点"
     lines.append(
         f'<section class="executive-summary" aria-label="{summary_heading}"><h2>{summary_heading}</h2><ul>'

@@ -109,11 +109,22 @@ def build_research_sections(
             lines.append("- 窗口内暂无入选的可追溯快讯。")
         lines.append("")
 
-    local_day = to_beijing(cutoff, timezone_name).date()
-    target = next_ice_trading_day(previous_ice_trading_day(local_day)).isoformat()
+    target = None
+    if not sample_data:
+        local_day = to_beijing(cutoff, timezone_name).date()
+        try:
+            target = next_ice_trading_day(previous_ice_trading_day(local_day)).isoformat()
+        except ValueError:
+            # Invalid optional holiday data must not prevent the historical report.
+            pass
+    target_label = "演示目标交易日" if sample_data else (
+        f"{target} 下一交易日" if target else "目标交易日待确认"
+    )
     direction, reason = "观望", "可核验模型输出缺失，保留条件情景。"
     if sample_data:
         reason = "合成输入仅用于验收流程。"
+    elif target is None:
+        reason = "交易日历配置无法使用，保留条件情景。"
     elif report_status != "FORMAL":
         reason = "主数据覆盖或更新未通过正式日报门槛。"
     elif price_layer and price_layer.get("status") == "success" and price_layer.get("target_date") == target:
@@ -121,7 +132,7 @@ def build_research_sections(
         reason = "以同一目标会话的纯价格模型为方向参考，需结合后续实物与价格证据验证。"
     lines.extend([
         f"## {OUTLOOK_HEADING}", "",
-        f"- **{target} 下一交易日** · {direction} · 定性置信度低。{reason} 置信度为研究判断。",
+        f"- **{target_label}** · {direction} · 定性置信度低。{reason} 置信度为研究判断。",
         "- **上行风险** 若实际减产、出口中断或航运受阻，短期可交付供应收紧，Brent 或获得上行支撑。",
         "- **下行风险** 若供应恢复、需求下修或库存超预期累积，现货紧张程度或风险溢价下降，Brent 或承压。",
         "- **观察条件** 用后续官方库存、产量、装船及航运信息，以及下一会话成交验证情景。",

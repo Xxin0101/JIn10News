@@ -58,10 +58,19 @@ class DailyResearchTests(unittest.TestCase):
                 )
                 self.assertIn(expected, "\n".join(sections))
 
+    def test_invalid_optional_holidays_do_not_block_report(self):
+        with patch.dict("os.environ", {"BRENT_PRICE_LAYER_HOLIDAYS": "bad-date"}):
+            content = "\n".join(build_research_sections(
+                [], self.cutoff, "Asia/Shanghai", "FORMAL", None
+            ))
+        self.assertIn("目标交易日待确认", content)
+        self.assertIn("观望", content)
+
     def test_sample_cli_generates_labeled_bundle_without_network(self):
         with tempfile.TemporaryDirectory() as directory:
             with patch.object(sys, "argv", ["tracker", "sample-report", "--output-dir", directory]):
-                with patch("urllib.request.urlopen", side_effect=AssertionError("network call")):
+                with patch("urllib.request.urlopen", side_effect=AssertionError("network call")), \
+                        patch.dict("os.environ", {"BRENT_PRICE_LAYER_HOLIDAYS": "bad-date"}):
                     self.assertEqual(main(), 0)
             files = list(Path(directory).iterdir())
             self.assertEqual(len(files), 5)
@@ -70,5 +79,6 @@ class DailyResearchTests(unittest.TestCase):
             body = report.read_text(encoding="utf-8")
             for label in ("测试样本", "供给", "需求", "库存", "OPEC", "地缘", "主观分析", "观望"):
                 self.assertIn(label, body)
+            self.assertEqual(body.count("查看完整 Audit →"), 1)
             self.assertNotIn("javascript:", body.lower())
             ElementTree.parse(next(path for path in files if path.suffix == ".svg"))

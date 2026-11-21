@@ -110,6 +110,9 @@ def parse_args() -> argparse.Namespace:
     prepare_forecast_p.add_argument("--end-date", required=True, help="分析结束交易日，格式YYYY-MM-DD。")
     prepare_forecast_p.add_argument("--target-date", required=True, help="预测目标周一，格式YYYY-MM-DD。")
 
+    sample_p = sub.add_parser("sample-report", help="用合成样本离线生成带标记的五件套。")
+    sample_p.add_argument("--output-dir", default="outputs/sample", help="测试样本输出目录。")
+
     init_p = sub.add_parser("init-db", help="初始化SQLite数据库。")
     init_p.add_argument("--db-path", default="data/jin10_tracker.sqlite", help="SQLite数据库路径。")
     return parser.parse_args()
@@ -167,6 +170,12 @@ def _failed_trump_update(day_start: datetime, day_end: datetime, reason: Excepti
 
 def main() -> int:
     args = parse_args()
+    if args.command == "sample-report":
+        from jin10_market_report.daily_sample import build_sample_report
+
+        print(f"测试样本 HTML：{build_sample_report(Path(args.output_dir))}")
+        return 0
+
     if args.command == "init-db":
         store = TrackerStore(args.db_path)
         try:

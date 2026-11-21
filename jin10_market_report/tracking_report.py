@@ -15,8 +15,9 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
-from .brent import BRENT_INSTRUMENT_METADATA, build_yahoo_chart_url
+from .brent import BRENT_INSTRUMENT_METADATA, build_yahoo_chart_url, bz_regular_close_utc
 from .config import BrentConfig, DEFAULT_HEADERS, JIN10_FLASH_API, YAHOO_CHART_API
+from .daily_research import EVIDENCE_HEADING, OUTLOOK_HEADING, SAMPLE_NOTICE, build_research_sections
 from .eventing import (
     direct_energy_supply_reason,
     has_direct_oil_market_relevance,
@@ -148,6 +149,8 @@ def _top_level_warning(
 
 
 def _report_title(report_status: str) -> str:
+    if report_status == "SAMPLE":
+        return "Brent 滚动日报（测试样本）"
     if report_status == "FAILED":
         return "金十-Brent数据更新失败说明"
     if report_status == "PARTIAL":
@@ -156,6 +159,8 @@ def _report_title(report_status: str) -> str:
 
 
 def _audit_title(report_status: str) -> str:
+    if report_status == "SAMPLE":
+        return "Brent 滚动日报审计报告（测试样本）"
     if report_status == "FAILED":
         return "金十-Brent滚动日报审计报告（FAILED）"
     if report_status == "PARTIAL":
@@ -164,6 +169,8 @@ def _audit_title(report_status: str) -> str:
 
 
 def _availability_label(report_status: str) -> str:
+    if report_status == "SAMPLE":
+        return "仅供流程验收"
     if report_status == "FORMAL":
         return "可作为完整复盘"
     if report_status == "PARTIAL":
@@ -636,6 +643,22 @@ def _reaction_observation_status(
     return "UNCONFIRMED", UNCONFIRMED_REACTION_NOTE
 
 
+def _is_bz_friday_close(
+    last_price: datetime,
+    start: datetime,
+    cutoff: datetime,
+    timezone_name: str,
+    brent: BrentConfig,
+) -> bool:
+    if (brent.source, brent.symbol, brent.interval) != ("yahoo", "BZ=F", "5m"):
+        return False
+    saturday = cutoff.astimezone(ZoneInfo(timezone_name)).date()
+    if saturday.weekday() != 5:
+        return False
+    close = bz_regular_close_utc(saturday - timedelta(days=1))
+    return start < close <= cutoff and last_price + timedelta(minutes=5) == close
+
+
 def _build_window_audit_core(
     store: TrackerStore,
     brent: BrentConfig,
@@ -733,7 +756,11 @@ def _build_window_audit_core(
     coverage_gaps = list(news_coverage_gaps)
     price_coverage_tolerance = timedelta(minutes=10)
     price_bar_span = timedelta(minutes=5) if brent.interval == "5m" else timedelta(0)
+    price_ends_at_weekend_close = False
     if live_freshness:
+        price_ends_at_weekend_close = bool(
+            last_price and _is_bz_friday_close(last_price, price_start, price_end, timezone_name, brent)
+        )
         price_start_covered = bool(
             first_price
             and (
@@ -747,7 +774,10 @@ def _build_window_audit_core(
         )
         price_end_covered = bool(
             last_price
-            and last_price + price_bar_span >= price_end - price_coverage_tolerance
+            and (
+                last_price + price_bar_span >= price_end - price_coverage_tolerance
+                or price_ends_at_weekend_close
+            )
         )
     else:
         # A validated Friday snapshot is bounded by its last trading session,
@@ -934,6 +964,7 @@ def _build_window_audit_core(
         "news_covered": news_covered,
         "price_start_covered": price_start_covered,
         "price_end_covered": price_end_covered,
+        "price_ends_at_weekend_close": price_ends_at_weekend_close,
         "price_boundary_covered": price_boundary_covered,
         "price_continuity_ok": price_continuity_ok,
         "price_continuity_issues": price_continuity_issues,
@@ -1998,6 +2029,14 @@ def _instrument_and_coverage_lines(
     timezone_name: str,
 ) -> list[str]:
     metadata = BRENT_INSTRUMENT_METADATA
+    if report_status == "SAMPLE":
+        metadata = {
+            "instrument_name": "合成 Brent 行情",
+            "source": "合成行情样本",
+            "ticker": "N/A",
+            "contract_month": "N/A",
+            "contract_type": "测试样本",
+        }
     price_rows = list(audit.get("price_rows") or [])
     coverage_gaps = [str(item) for item in list(audit.get("coverage_gaps") or [])]
     lines = [
@@ -2031,6 +2070,8 @@ def _instrument_and_coverage_lines(
         lines.append(f"- 数据状态：{report_status}；原因：{'；'.join(coverage_gaps)}")
     else:
         lines.append(f"- 数据状态：{report_status}；窗口覆盖校验通过。")
+    if audit.get("price_ends_at_weekend_close"):
+        lines.append("- 行情覆盖到 BZ 周五常规收盘。此后至日报截止为周末休市。")
     lines.append("")
     return lines
 
@@ -5376,7 +5417,7 @@ def _build_audit_report_lines(
         "",
         "本报告用于核查数据是否完整、夜间新闻是否漏抓、重大候选是否被错误排除、Brent价格异动是否被合理解释。正式日报用于快速交易复盘，本审计报告保留完整复核痕迹。",
         "",
-        f"- 新闻来源：金十数据",
+        "- 新闻来源：合成新闻样本" if audit_status == "SAMPLE" else "- 新闻来源：金十数据",
         f"- Brent价格源：{_source_label(brent)}",
         f"- 审计生成时间：{datetime.now(ZoneInfo(timezone_name)).strftime('%Y-%m-%d %H:%M:%S')} 北京时间",
         "",
@@ -5522,6 +5563,8 @@ def _price_layer_markdown_lines(payload: Mapping[str, object]) -> list[str]:
         f"- 历史 Balanced Accuracy：{float(payload['balanced_accuracy']):.2%}",
         f"- 历史 MAE / RMSE：{float(payload['mae']):.4f} / {float(payload['rmse']):.4f}",
         f"- 历史 OOS 样本：{int(payload.get('oos_samples') or 0)}",
+        f"- 模型来源：六模型 Price Layer。输入会话 {payload.get('as_of_date') or 'N/A'}，"
+        f"样本外评估截至 {payload.get('last_oos_date') or 'N/A'}。",
         "- 数据边界：仅使用历史价格数据，不使用任何新闻或非价格输入。",
         "",
         f"> {payload.get('summary') or 'Price Layer 暂无可用总结。'}",
@@ -5549,6 +5592,13 @@ def _price_layer_html(payload: Mapping[str, object]) -> str:
         ("预测方向", str(payload.get("predicted_direction") or "N/A")),
         ("Direction Accuracy", f"{float(payload['direction_accuracy']):.2%}"),
         ("Balanced Accuracy", f"{float(payload['balanced_accuracy']):.2%}"),
+        ("MAE / RMSE", " / ".join(
+            f"{float(payload[key]):.4f}" if key in payload else "N/A"
+            for key in ("mae", "rmse")
+        )),
+        ("OOS 样本", str(int(payload.get("oos_samples") or 0))),
+        ("模型输入会话", str(payload.get("as_of_date") or "N/A")),
+        ("OOS 评估截止", str(payload.get("last_oos_date") or "N/A")),
     )
     cards = "".join(
         '<div class="price-layer-metric">'
@@ -5560,7 +5610,7 @@ def _price_layer_html(payload: Mapping[str, object]) -> str:
         '<span class="price-layer-kicker">PRICE LAYER</span><h2>今日 Brent 价格预测</h2>'
         f'<div class="price-layer-grid">{cards}</div>'
         f'<p class="price-layer-summary">{html.escape(str(payload.get("summary") or ""))}</p>'
-        '<p class="price-layer-note">仅使用历史价格数据，不使用任何新闻或非价格输入。</p>'
+        '<p class="price-layer-note">来源：六模型 Price Layer 的历史价格与保存的样本外评估。仅使用历史价格数据，不使用任何新闻或非价格输入。</p>'
         '</section>'
     )
 
@@ -5585,6 +5635,7 @@ def build_markdown_report(
     forecast: dict[str, object] | None = None,
     read_only_source: bool = False,
     frozen_snapshot: bool = False,
+    sample_data: bool = False,
 ) -> ReportBuildResult:
     if (window_start_utc is None) != (window_end_utc is None):
         raise ValueError("自定义统计窗口必须同时提供开始和结束时间。")
@@ -5604,6 +5655,8 @@ def build_markdown_report(
     news_end = ensure_utc(news_window_end_utc or day_end)
     if news_end <= news_start or news_start < day_start or news_end > day_end:
         raise ValueError("新闻窗口必须位于价格统计窗口内且结束时间晚于开始时间。")
+    if sample_data:
+        external_update = trump_update = {"status": "not_applicable", "failure_reason": "测试样本未抓取外部背景。"}
     if external_update is None:
         external_update = fetch_latest_isw_update(
             news_end,
@@ -5619,7 +5672,7 @@ def build_markdown_report(
         )
     if not read_only_source:
         store.refresh_multi_event_groups(news_start, news_end)
-    audit_builder = _build_frozen_snapshot_audit if frozen_snapshot else _build_window_audit
+    audit_builder = _build_frozen_snapshot_audit if frozen_snapshot or sample_data else _build_window_audit
     audit = audit_builder(
         store,
         brent,
@@ -5680,7 +5733,9 @@ def build_markdown_report(
     rows = [reaction_by_id[raw_id] for raw_id in selected_order if raw_id in reaction_by_id]
     brent_summary = brent_day_summary(store, brent, day_start, day_end)
     price_layer: dict[str, object] | None = None
-    if forecast is None and not frozen_snapshot:
+    if sample_data:
+        price_layer = {"status": "unavailable", "failure_reason": "测试样本未运行量化模型。"}
+    elif forecast is None and not frozen_snapshot:
         from .price_layer import build_daily_price_forecast_safe
 
         price_layer = build_daily_price_forecast_safe(
@@ -5690,7 +5745,17 @@ def build_markdown_report(
             timezone_name=timezone_name,
         )
     output_dir.mkdir(parents=True, exist_ok=True)
-    if frozen_snapshot:
+    if sample_data:
+        final_status = "SAMPLE"
+        status_summary = {
+            "script_execution_status": "成功",
+            "news_update_status": "合成新闻样本",
+            "price_update_status": "合成行情样本",
+            "data_integrity_status": "测试样本",
+            "formal_report_availability": _availability_label(final_status),
+            "manual_rerun_required": "否",
+        }
+    elif frozen_snapshot:
         final_status = "FORMAL"
         status_summary = {
             "script_execution_status": "成功",
@@ -5717,7 +5782,7 @@ def build_markdown_report(
         **status_summary,
         "report_status": audit_status,
         "formal_report_availability": _availability_label(audit_status),
-        "manual_rerun_required": "是" if audit_status != "FORMAL" else "否",
+        "manual_rerun_required": "否" if audit_status in {"FORMAL", "SAMPLE"} else "是",
     }
     start_local = to_beijing(day_start, timezone_name)
     end_local = to_beijing(day_end, timezone_name)
@@ -5739,8 +5804,8 @@ def build_markdown_report(
         if forecast
         else end_local.strftime("%Y%m%d 08:00")
     )
-    warning_banner = None
-    if final_status != "FORMAL":
+    warning_banner = SAMPLE_NOTICE if sample_data else None
+    if final_status in {"FAILED", "PARTIAL"}:
         warning_banner = _top_level_warning(
             day_end,
             audit.get("news_freshness") != "passed",
@@ -5857,6 +5922,7 @@ def build_markdown_report(
             f"统计窗口：{start_local.strftime('%Y-%m-%d %H:%M')} 至 {end_local.strftime('%Y-%m-%d %H:%M')}（Asia/Shanghai）",
             f"新闻范围：{to_beijing(news_start, timezone_name).strftime('%Y-%m-%d %H:%M')} 至 {to_beijing(news_end, timezone_name).strftime('%Y-%m-%d %H:%M')}"
             f"（{forecast.get('news_scope_note') if forecast and forecast.get('news_scope_note') else window_copy['news_scope_note']}）",
+            "数据来源：合成新闻与合成行情（测试样本）" if sample_data else
             f"数据来源：金十数据快讯｜{_source_label(brent)}｜金十数据特朗普专栏｜ISW Iran Update（仅用于后续监测）",
             "",
         ]
@@ -5872,6 +5938,13 @@ def build_markdown_report(
             ]
         )
     lines.extend(_instrument_and_coverage_lines(audit, final_status, timezone_name))
+    if forecast is None and not frozen_snapshot and audit.get("last_price"):
+        source = _source_label(brent)
+        if brent.source == "yahoo":
+            ticker = urllib.parse.quote(brent.symbol, safe="")
+            source = f"[{source}](https://finance.yahoo.com/quote/{ticker}/)"
+        last_price_at = _bj_from_dt(audit["last_price"], timezone_name, with_seconds=True)
+        lines.extend([f"行情观测：{source} · 最后一根 K 线起始于 {last_price_at}（{timezone_name}）", ""])
     lines.extend(
         [
             "## 本窗口Brent表现",
@@ -5906,8 +5979,14 @@ def build_markdown_report(
     lines.extend(["## 市场主要驱动与下一时段判断", ""])
     lines.extend(_movement_driver_lines(movement_review, brent_summary, timezone_name, audit=audit))
     lines.extend([""])
-    lines.extend(_trump_statement_lines(trump_update))
-    lines.extend(_tracking_outlook_lines(external_update))
+    if forecast is None and not frozen_snapshot:
+        lines.extend(build_research_sections(
+            audit.get("raw_rows", []), day_end, timezone_name, final_status, price_layer,
+            sample_data=sample_data,
+        ))
+    if not sample_data:
+        lines.extend(_trump_statement_lines(trump_update))
+        lines.extend(_tracking_outlook_lines(external_update))
     lines.extend([f"[查看完整 Audit →]({audit_path.with_suffix('.html').name})", ""])
 
     audit_lines = _build_audit_report_lines(
@@ -6515,7 +6594,7 @@ def _parse_formal_dashboard(
     logic_match = re.search(r"可归因线索主要集中在([^，。；]+)", text)
     logic = logic_match.group(1).strip() if logic_match else "暂无足够明确的单一交易主线"
     title = next((line[2:] for line in lines if line.startswith("# ")), "Brent滚动日报")
-    meta = [line for line in lines if line.startswith(("统计窗口：", "新闻范围：", "数据来源："))][:3]
+    meta = [line for line in lines if line.startswith(("统计窗口：", "新闻范围：", "数据来源：", "行情观测："))]
     preamble_end = next(
         (
             index
@@ -6596,6 +6675,11 @@ def _parse_formal_dashboard(
         ),
         "forecast": dict(presentation.forecast or {}) if presentation else {},
         "price_layer": dict(presentation.price_layer or {}) if presentation else {},
+        "research_sections": {
+            heading: _formal_section(lines, heading, ())
+            for heading in (EVIDENCE_HEADING, OUTLOOK_HEADING)
+        },
+        "sample_data": SAMPLE_NOTICE in text,
         "trump_items": (
             list(presentation.trump_items)
             if presentation and presentation.trump_items
@@ -6858,6 +6942,8 @@ def _embedded_chart_html(
 
 def _formal_dashboard_body(markdown_path: Path, dashboard: dict[str, object]) -> list[str]:
     lines = [f'<main class="report-shell"><h1>{_inline_markdown_html(str(dashboard["title"]))}</h1>']
+    if dashboard.get("sample_data"):
+        lines.append(f'<blockquote>{SAMPLE_NOTICE}</blockquote>')
     summary_heading = "今日总结" if dashboard.get("forecast") else "今日重点"
     lines.append(
         f'<section class="executive-summary" aria-label="{summary_heading}"><h2>{summary_heading}</h2><ul>'
@@ -7101,6 +7187,16 @@ def _formal_dashboard_body(markdown_path: Path, dashboard: dict[str, object]) ->
             text += f' <a href="{html.escape(url, quote=True)}" target="_blank" rel="noopener noreferrer">查看原文 ↗</a>'
         lines.append(f"<li>{text}</li>")
     lines.append("</ul></section></div>")
+    for heading, content in (dashboard.get("research_sections") or {}).items():
+        if not content:
+            continue
+        lines.append(f'<section class="summary-card"><h2>{heading}</h2>')
+        for entry in content:
+            if entry.startswith("### "):
+                lines.append(f'<h3>{_inline_markdown_html(entry[4:])}</h3>')
+            elif entry.strip():
+                lines.append(f'<p>{_inline_markdown_html(entry.removeprefix("- "))}</p>')
+        lines.append("</section>")
     audit_link = str(dashboard.get("audit_link") or "")
     if audit_link:
         lines.append(f'<div class="audit-link">{_inline_markdown_html(audit_link)}</div>')
@@ -7127,7 +7223,9 @@ def build_html_report(
     text = markdown_path.read_text(encoding="utf-8")
     stem = markdown_path.stem
     is_audit = "Rolling_Audit" in stem
-    if is_audit:
+    if stem.endswith("_SAMPLE"):
+        page_title = "Brent 滚动日报审计报告（测试样本）" if is_audit else "Brent 滚动日报（测试样本）"
+    elif is_audit:
         if "FAILED" in stem:
             page_title = "金十-Brent滚动日报审计报告（FAILED）"
         elif "PARTIAL" in stem:

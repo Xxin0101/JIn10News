@@ -119,6 +119,27 @@ python3 run_jin10_report.py --dry-run
 
 ## Brent 日内跟踪模式
 
+### 生成一份日报
+
+使用 Python 3.10+ 和系统 IANA 时区数据库。下列跟踪器命令只使用 Python 标准库。需要旧版 Word 日报时执行 `python -m pip install -e .`，专项预测的可选依赖见 `requirements-forecast.txt`。
+
+```bash
+# 使用公开接口回补一个真实窗口并生成日报
+python run_jin10_tracker.py backfill-day --date 2026-11-21
+
+# 使用现有 SQLite 主数据重复生成，外部背景使用已有缓存或公开来源
+python run_jin10_tracker.py report --date 2026-11-21
+
+# 无网络、无真实模型、无持久化数据库的合成样本
+python run_jin10_tracker.py sample-report
+
+python -m unittest discover -s tests
+```
+
+示例日期以北京时间 08:00 为截止。实时运行可使用 `run-once` 或交由外部调度器调用。生产环境为数据库、外部缓存、输出和日志保留持久化存储，并读取 Audit 的 `FORMAL`、`PARTIAL` 或 `FAILED` 状态。
+
+常规日报输出主报告、审计 Markdown/HTML 和图表 SVG。主报告分别展示价格观测、带发布时间和原文的能源快讯、条件性传导、纯价格模型输出和下一交易日研究判断。OPEC 等主题缺少合格报道时会标明。分析置信度为定性判断，模型或主窗口证据不足时给出观望和条件情景。样本生成至 `outputs/sample`，全部文件带 `_SAMPLE` 标记。目录整体移动可以保留相对链接。详细依赖、差异及优先级见[接管审计](docs/brent-takeover.md)。
+
 ### 功能概览
 
 - 新闻来源仍仅使用金十数据公开实时资讯接口。
@@ -218,7 +239,7 @@ python3 run_jin10_tracker.py report --date 2026-07-02
 python3 run_jin10_tracker.py backfill-day --date 2026-07-02
 ```
 
-历史回补仍只使用金十公开快讯接口，会从当前公开快讯流逐页向前回溯。如果公开接口在目标窗口前停止返回数据，日志会明确记录“目标日期可能需要登录/VIP历史查询或其他金十公开页面”。Brent 5 分钟K线会按 08:00 滚动窗口前后扩展范围单独补取。
+历史回补仍只使用金十公开快讯接口，从指定窗口截止时刻开始逐页向前回溯。如果公开接口在目标窗口前停止返回数据，日志会明确记录“目标日期可能需要登录/VIP历史查询或其他金十公开页面”。Brent 5 分钟K线会按 08:00 滚动窗口前后扩展范围单独补取。
 
 ## SQLite 字段说明
 

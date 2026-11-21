@@ -6,8 +6,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, time as clock_time, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .config import BrentConfig, YAHOO_CHART_API
 from .time_utils import UTC, ensure_utc, iso_utc, utc_now
@@ -20,6 +21,11 @@ BRENT_INSTRUMENT_METADATA = {
     "contract_month": "",
     "contract_type": "Yahoo Finance BZ=F",
 }
+
+
+def bz_regular_close_utc(session_date: date) -> datetime:
+    """Regular NYMEX BZ close, including the New York DST offset."""
+    return datetime.combine(session_date, clock_time(17), ZoneInfo("America/New_York")).astimezone(UTC)
 
 
 class BrentFetchError(RuntimeError):

@@ -161,6 +161,21 @@ class PriceLayerSelectionTests(unittest.TestCase):
                 timezone_name="Asia/Shanghai",
             )
 
+    def test_bz_winter_price_layer_uses_last_regular_session_bar(self) -> None:
+        from jin10_market_report.forecast import build_local_session_daily_bars
+        from jin10_market_report.price_layer import validate_complete_price_session
+
+        session = date(2026, 11, 20)
+        rows = [
+            {"ts_utc": "2026-11-20T20:55:00Z", "open": 90, "high": 90, "low": 90, "close": 90},
+            {"ts_utc": "2026-11-20T21:55:00Z", "open": 91, "high": 91, "low": 91, "close": 91},
+        ]
+        kwargs = {"timezone_name": "Asia/Shanghai", "use_bz_close": True}
+        self.assertEqual(validate_complete_price_session(rows, expected_session=session, **kwargs), 91)
+        self.assertEqual(build_local_session_daily_bars(rows, as_of_date=session, **kwargs)[-1].close, 91)
+        with self.assertRaisesRegex(ValueError, "收盘边界"):
+            validate_complete_price_session(rows[:1], expected_session=session, **kwargs)
+
 
 class PriceLayerRenderingTests(unittest.TestCase):
     def test_price_layer_is_rendered_as_an_independent_news_free_today_section(self) -> None:

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Mapping, Sequence
 from zoneinfo import ZoneInfo
 
+from .brent import bz_regular_close_utc
 from .forecast import build_local_session_daily_bars
 
 
@@ -273,8 +274,10 @@ def validate_complete_price_session(
     *,
     expected_session: date,
     timezone_name: str,
+    use_bz_close: bool = False,
 ) -> float:
     tz = ZoneInfo(timezone_name)
+    bz_close = bz_regular_close_utc(expected_session) if use_bz_close else None
     candidates: list[tuple[datetime, float]] = []
     for row in rows:
         try:
@@ -287,7 +290,7 @@ def validate_complete_price_session(
             raise ValueError("Brent价格缓存包含无效时间或收盘价。") from exc
         if local.time() >= time(8, 0):
             session_date = local.date()
-        elif local.time() < time(5, 0):
+        elif timestamp < bz_close if bz_close is not None else local.time() < time(5, 0):
             session_date = local.date() - timedelta(days=1)
         else:
             continue
@@ -297,7 +300,12 @@ def validate_complete_price_session(
         raise ValueError(f"Brent价格缓存未覆盖预期交易日 {expected_session.isoformat()}。")
     last_local, last_close = max(candidates, key=lambda item: item[0])
     expected_close_date = expected_session + timedelta(days=1)
-    if last_local.date() != expected_close_date or last_local.time() < time(4, 45):
+    near_close = (
+        bz_close - timedelta(minutes=15) <= last_local < bz_close
+        if bz_close is not None
+        else last_local.time() >= time(4, 45)
+    )
+    if last_local.date() != expected_close_date or not near_close:
         raise ValueError(
             f"Brent价格缓存未覆盖{expected_session.isoformat()}交易日的收盘边界。"
         )
@@ -482,15 +490,20 @@ def build_daily_price_forecast(
     )
     cutoff_local_date = cutoff.astimezone(ZoneInfo(timezone_name)).date()
     expected_session = previous_ice_trading_day(cutoff_local_date)
+    use_bz_close = brent.source == "yahoo" and brent.symbol == "BZ=F" and timezone_name in {
+        "Asia/Shanghai", "Asia/Singapore",
+    }
     validated_close = validate_complete_price_session(
         rows,
         expected_session=expected_session,
         timezone_name=timezone_name,
+        use_bz_close=use_bz_close,
     )
     local_bars = build_local_session_daily_bars(
         rows,
         as_of_date=cutoff_local_date,
         timezone_name=timezone_name,
+        use_bz_close=use_bz_close,
     )
     current_bar = next(
         (bar for bar in reversed(local_bars) if bar.trading_date == expected_session),

@@ -291,6 +291,7 @@ def build_local_session_daily_bars(
     *,
     as_of_date: date,
     timezone_name: str = "Asia/Shanghai",
+    use_bz_close: bool = False,
 ) -> list[DailyBar]:
     """Aggregate cached 5-minute bars into Beijing-labelled trading sessions.
 
@@ -299,6 +300,7 @@ def build_local_session_daily_bars(
     gap are ignored.  This lets weekend report generation consume the saved
     Friday close without asking a data source for Saturday/Sunday bars.
     """
+    from .brent import bz_regular_close_utc
     from .time_utils import parse_iso_utc
 
     tz = ZoneInfo(timezone_name)
@@ -313,7 +315,11 @@ def build_local_session_daily_bars(
         local = timestamp.astimezone(tz)
         if local.time() >= time(8, 0):
             session_date = local.date()
-        elif local.time() < time(5, 0):
+        elif (
+            timestamp < bz_regular_close_utc(local.date() - timedelta(days=1))
+            if use_bz_close
+            else local.time() < time(5, 0)
+        ):
             session_date = local.date() - timedelta(days=1)
         else:
             continue

@@ -405,6 +405,18 @@ class DailyRequirementTests(unittest.TestCase):
             )
         )
 
+    def test_saturday_cutoff_uses_the_actual_bz_friday_close(self) -> None:
+        for friday_hour in (20, 21):
+            start = datetime(2026, 8, 21, tzinfo=UTC) if friday_hour == 20 else datetime(2026, 11, 20, tzinfo=UTC)
+            cutoff = start + timedelta(days=1)
+            last = start.replace(hour=friday_hour, minute=55)
+            with self.subTest(start=start):
+                args = (start, cutoff, "Asia/Shanghai", BrentConfig())
+                self.assertTrue(tracking_report._is_bz_friday_close(last, *args))
+                self.assertFalse(tracking_report._is_bz_friday_close(last - timedelta(minutes=5), *args))
+                self.assertFalse(tracking_report._is_bz_friday_close(last, start, cutoff, "Asia/Shanghai",
+                                                                  BrentConfig(symbol="other")))
+
     def test_live_window_start_during_weekend_is_covered_by_monday_open(self) -> None:
         start = datetime(2026, 10, 17, 0, 0, tzinfo=UTC)
         end = datetime(2026, 10, 19, 0, 0, tzinfo=UTC)

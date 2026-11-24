@@ -60,6 +60,7 @@ class FormalReportPresentation:
     homepage_representations: Optional[dict[str, str]] = None
     forecast: Optional[dict[str, object]] = None
     price_layer: Optional[dict[str, object]] = None
+    news_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -5636,6 +5637,7 @@ def build_markdown_report(
     read_only_source: bool = False,
     frozen_snapshot: bool = False,
     sample_data: bool = False,
+    news_only: bool = False,
 ) -> ReportBuildResult:
     if (window_start_utc is None) != (window_end_utc is None):
         raise ValueError("自定义统计窗口必须同时提供开始和结束时间。")
@@ -5735,7 +5737,7 @@ def build_markdown_report(
     price_layer: dict[str, object] | None = None
     if sample_data:
         price_layer = {"status": "unavailable", "failure_reason": "测试样本未运行量化模型。"}
-    elif forecast is None and not frozen_snapshot:
+    elif forecast is None and not frozen_snapshot and not news_only:
         from .price_layer import build_daily_price_forecast_safe
 
         price_layer = build_daily_price_forecast_safe(
@@ -5976,10 +5978,11 @@ def build_markdown_report(
     lines.extend(_unexplained_price_movement_lines(movement_review, timezone_name, include_chart_ids=False))
     lines.extend(_unpriced_risk_lines(audit, watch_rows, selected_raw_ids, timezone_name))
     lines.extend(_unmatched_homepage_summary_lines(summary_homepage_item))
-    lines.extend(["## 市场主要驱动与下一时段判断", ""])
-    lines.extend(_movement_driver_lines(movement_review, brent_summary, timezone_name, audit=audit))
-    lines.extend([""])
-    if forecast is None and not frozen_snapshot:
+    if not news_only:
+        lines.extend(["## 市场主要驱动与下一时段判断", ""])
+        lines.extend(_movement_driver_lines(movement_review, brent_summary, timezone_name, audit=audit))
+        lines.extend([""])
+    if forecast is None and not frozen_snapshot and not news_only:
         lines.extend(build_research_sections(
             audit.get("raw_rows", []), day_end, timezone_name, final_status, price_layer,
             sample_data=sample_data,
@@ -6030,6 +6033,7 @@ def build_markdown_report(
         homepage_representations=homepage_presentation.homepage_representations,
         forecast=forecast,
         price_layer=price_layer,
+        news_only=news_only,
     )
     return ReportBuildResult(markdown_path=path, presentation=presentation)
 
@@ -6594,7 +6598,11 @@ def _parse_formal_dashboard(
     logic_match = re.search(r"可归因线索主要集中在([^，。；]+)", text)
     logic = logic_match.group(1).strip() if logic_match else "暂无足够明确的单一交易主线"
     title = next((line[2:] for line in lines if line.startswith("# ")), "Brent滚动日报")
-    meta = [line for line in lines if line.startswith(("统计窗口：", "新闻范围：", "数据来源：", "行情观测："))]
+    meta = [
+        line for line in lines if line.startswith(
+            ("统计窗口：", "新闻范围：", "数据来源：", "行情观测：", "新闻覆盖状态：")
+        )
+    ]
     preamble_end = next(
         (
             index
@@ -6675,9 +6683,10 @@ def _parse_formal_dashboard(
         ),
         "forecast": dict(presentation.forecast or {}) if presentation else {},
         "price_layer": dict(presentation.price_layer or {}) if presentation else {},
+        "news_only": bool(presentation and presentation.news_only),
         "research_sections": {
             heading: [line for line in _formal_section(lines, heading, ()) if line.strip() != audit_link]
-            for heading in (EVIDENCE_HEADING, OUTLOOK_HEADING)
+            for heading in (EVIDENCE_HEADING, OUTLOOK_HEADING, "新闻专题")
         },
         "trump_items": (
             list(presentation.trump_items)
@@ -7066,9 +7075,14 @@ def _formal_dashboard_body(markdown_path: Path, dashboard: dict[str, object]) ->
         lines.append(chart)
     else:
         lines.append('<p class="chart-missing">本窗口可用价格数据不足，未生成K线图。</p>')
+    panel_hint = (
+        "本期未生成可用 K 线图。下方显示已核验新闻。"
+        if dashboard.get("news_only") and not chart
+        else "点击上方K线图中的蓝色新闻时间点，查看该时段的相关新闻与市场解读。"
+    )
     lines.append(
         '<div id="related-news-panel" class="news-panel" aria-live="polite">'
-        '<p class="news-panel-empty">点击上方K线图中的蓝色新闻时间点，查看该时段的相关新闻与市场解读。</p>'
+        f'<p class="news-panel-empty">{panel_hint}</p>'
         "</div>"
     )
     important_news = list(forecast.get("important_news") or []) if isinstance(forecast, Mapping) else []
@@ -7191,6 +7205,8 @@ def _formal_dashboard_body(markdown_path: Path, dashboard: dict[str, object]) ->
         for entry in content:
             if entry.startswith("### "):
                 lines.append(f'<h3>{_inline_markdown_html(entry[4:])}</h3>')
+            elif entry.startswith("#### "):
+                lines.append(f'<h4>{_inline_markdown_html(entry[5:])}</h4>')
             elif entry.strip():
                 lines.append(f'<p>{_inline_markdown_html(entry.removeprefix("- "))}</p>')
         lines.append("</section>")

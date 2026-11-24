@@ -138,6 +138,16 @@ python -m unittest discover -s tests
 
 示例日期以北京时间 08:00 为截止。实时运行可使用 `run-once` 或交由外部调度器调用。生产环境为数据库、外部缓存、输出和日志保留持久化存储，并读取 Audit 的 `FORMAL`、`PARTIAL` 或 `FAILED` 状态。
 
+新闻版可使用相同的滚动日报界面。将已核验的新闻 Markdown 传入原有渲染链路。输入包含 `新闻覆盖状态：COMPLETE` 或 `PARTIAL`、`## 最重要进展` 和分类新闻章节。可选的 `## 下一时段待确认` 会进入跟踪卡片。
+
+```bash
+python -m jin10_market_report.news_dashboard --date 2026-11-24 \
+  --db-path data/cloud-news/jin10.sqlite --news-markdown outputs/cloud-news/2026-11-24/README.md \
+  --output-dir outputs/cloud-news/2026-11-24-dashboard --refresh-sources
+```
+
+该入口在内存中复用 SQLite 输入，截断截止点后的价格观测。行情可用时呈现 K 线和交互式新闻面板，缺失时保留同一界面和新闻专题。新闻版省略模型、回测和方向预测。周一覆盖上周五 08:00 至周一 08:00，其他日期使用 24 小时窗口。
+
 常规日报输出主报告、审计 Markdown/HTML 和图表 SVG。主报告分别展示价格观测、带发布时间和原文的能源快讯、条件性传导、纯价格模型输出和下一交易日研究判断。OPEC 等主题缺少合格报道时会标明。分析置信度为定性判断，模型或主窗口证据不足时给出观望和条件情景。样本生成至 `outputs/sample`，全部文件带 `_SAMPLE` 标记。目录整体移动可以保留相对链接。详细依赖、差异及优先级见[接管审计](docs/brent-takeover.md)。
 
 ### 功能概览

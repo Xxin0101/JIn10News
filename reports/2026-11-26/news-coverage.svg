@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 280" role="img" aria-labelledby="title">
+<title id="title">金十快讯分时段记录数</title>
+<rect width="800" height="280" rx="18" fill="#f3f7fa"/>
+<text x="32" y="46" font-family="sans-serif" font-size="25" fill="#18304b">金十快讯分时段记录数</text>
+<text x="32" y="103" font-family="sans-serif" font-size="19" fill="#18304b">08:00–16:00</text>
+<rect x="180" y="83" width="306" height="27" rx="5" fill="#1c7890"/>
+<text x="500" y="103" font-family="sans-serif" font-size="19" fill="#18304b">435</text>
+<text x="32" y="160" font-family="sans-serif" font-size="19" fill="#18304b">16:00–00:00</text>
+<rect x="180" y="140" width="430" height="27" rx="5" fill="#1c7890"/>
+<text x="624" y="160" font-family="sans-serif" font-size="19" fill="#18304b">611</text>
+<text x="32" y="217" font-family="sans-serif" font-size="19" fill="#18304b">00:00–08:00</text>
+<rect x="180" y="197" width="158" height="27" rx="5" fill="#1c7890"/>
+<text x="352" y="217" font-family="sans-serif" font-size="19" fill="#18304b">224</text>
+</svg>

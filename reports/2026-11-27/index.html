@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>金十-Brent滚动日报（缓存复盘版）</title>
+<style>
+:root{color-scheme:light;--ink:#172033;--muted:#64748b;--line:#dfe6ef;--soft:#f6f8fb;--news:#2563eb;--up:#c2413b;--down:#1b7f5a}
+*{box-sizing:border-box}body{margin:0;padding:34px 24px;background:#f3f6fa;color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif;line-height:1.62;overflow-x:hidden}
+.report-shell{max-width:1320px;margin:0 auto;padding:42px 48px 34px;background:#fff;border:1px solid #e4eaf1;border-radius:22px;box-shadow:0 18px 48px rgba(15,23,42,.07)}
+h1{margin:0;color:#0f2747;font-size:30px;line-height:1.25;letter-spacing:-.02em}.report-meta{margin:10px 0 28px}.report-meta p{margin:2px 0;color:var(--muted);font-size:14px}
+h2{margin:0;color:#152a46;font-size:19px;line-height:1.35}.section-title{margin:30px 0 12px}p{margin:8px 0;color:#334155}blockquote{margin:16px 0;padding:10px 14px;border-left:3px solid #94a3b8;background:var(--soft);color:#475569}
+a{color:#165dcc;text-underline-offset:3px}ul{margin:8px 0;padding-left:22px}li{margin:8px 0}
+.executive-summary{margin:22px 0 16px;padding:20px 24px;border:1px solid #cbdcf1;border-left:4px solid var(--news);border-radius:14px;background:#f8fbff}.executive-summary h2{margin-bottom:10px}.executive-summary ul{margin-bottom:0}.executive-summary li{color:#273a55}
+.forecast-card{margin:18px 0 22px;padding:24px;border:1px solid #7aa7e6;border-radius:18px;background:linear-gradient(145deg,#eef6ff 0%,#f8fbff 56%,#fff 100%);box-shadow:0 14px 30px rgba(37,99,235,.10)}.forecast-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px}.forecast-heading h2{font-size:23px;color:#123d73}.forecast-kicker{display:block;margin-bottom:4px;color:#2563eb;font-size:11px;font-weight:800;letter-spacing:.14em}.confidence-badge{display:inline-flex;padding:6px 11px;border-radius:999px;background:#173f7a;color:#fff;font-size:12px;font-weight:800}.forecast-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.forecast-metric{padding:13px 14px;border:1px solid #c5daf5;border-radius:12px;background:rgba(255,255,255,.84)}.forecast-metric span{display:block;margin-bottom:5px;color:#5a7090;font-size:12px}.forecast-metric strong{display:block;color:#143960;font-size:15px}.forecast-note{margin:12px 0 0;color:#496581;font-size:13px}.forecast-evidence-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:16px}.forecast-evidence-grid>div{padding:13px 14px;border-top:1px solid #c9dcf4}.forecast-evidence-grid h3{margin:0 0 5px;color:#234d7d;font-size:14px}.forecast-evidence-grid ul{margin:0}.forecast-evidence-grid li{color:#405773;font-size:13px}
+.important-news-section{margin:22px 0;padding:22px;border:1px solid var(--line);border-radius:16px;background:#fbfcfe}.important-news-section>h2{margin-bottom:5px}.important-news-intro{margin:0 0 14px;color:#66768b;font-size:13px}.important-news-item{padding:15px 0;border-top:1px solid #dfe7f0}.important-news-item:first-of-type{border-top:0}.important-news-item h3{margin:8px 0 7px;font-size:16px;color:#183b62}.important-news-item p{margin:5px 0;color:#40536b;font-size:13px}.important-news-item>a{display:inline-block;margin-top:6px;font-size:13px}.important-news-meta{display:flex;flex-wrap:wrap;gap:7px}.important-news-meta time,.important-news-meta span{padding:3px 7px;border-radius:999px;background:#edf3fa;color:#47627f;font-size:11px}.important-news-reaction{font-variant-numeric:tabular-nums}
+.forecast-backtest{margin-top:18px;padding-top:14px;border-top:1px solid #b9d1ef}.forecast-backtest h3{margin:0 0 8px;color:#234d7d;font-size:15px}.forecast-backtest .table-wrap{margin:0;background:rgba(255,255,255,.86)}.forecast-backtest table{font-size:12px}
+.price-layer-card{margin:24px 0 4px;padding:22px;border:1px solid #9fc3e8;border-radius:16px;background:#f7fbff}.price-layer-kicker{display:block;margin-bottom:4px;color:#2563eb;font-size:11px;font-weight:800;letter-spacing:.14em}.price-layer-card h2{margin-bottom:14px;color:#123d73}.price-layer-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}.price-layer-metric{padding:11px 12px;border:1px solid #d3e3f4;border-radius:10px;background:#fff}.price-layer-metric span{display:block;margin-bottom:4px;color:#60758d;font-size:11px}.price-layer-metric strong{display:block;color:#183b62;font-size:14px}.price-layer-summary{margin:14px 0 6px;color:#294d73;font-weight:650}.price-layer-note{margin:6px 0 0;color:#66768b;font-size:12px}
+.context-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:18px 0 24px}.context-card{padding:16px 18px;border:1px solid var(--line);border-radius:14px;background:var(--soft)}.context-card h2{margin-bottom:8px}.context-card ul{margin-bottom:0}.context-card li{color:#475569;font-size:13px}
+.market-lede{margin:22px 0 26px;padding:16px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.market-lede h2{margin:0 0 8px}.market-lede p{margin:4px 0;color:#2c3b52;font-size:15px}
+.metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:12px 0 22px}.metric-card{padding:18px 18px 16px;border:1px solid var(--line);border-radius:14px;background:#fff}.metric-label{display:block;margin-bottom:7px;color:var(--muted);font-size:13px}.metric-value{display:block;font:700 26px/1.15 'SFMono-Regular',Consolas,monospace;color:#152a46}.metric-value.metric-up{color:var(--up)}.metric-value.metric-down{color:var(--down)}
+.news-panel{min-height:92px;margin:14px 0 0;padding:18px 20px;border:1px solid #8bb7f0;border-radius:14px;background:#eff6ff;box-shadow:0 8px 22px rgba(37,99,235,.08)}.news-panel-empty{margin:14px 0;color:#315c91;text-align:center}.news-panel-title{margin:0;color:#163f75;font-size:18px}.news-display-summary{margin:5px 0 12px;color:#496581;font-size:13px}.event-summary{display:flex;flex-wrap:wrap;gap:8px 18px;margin:8px 0 12px;color:#35506f;font-size:14px}.event-reactions{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:12px 0}.event-reaction{padding:8px 10px;border:1px solid #c7dcf5;border-radius:9px;background:#fff}.event-reaction span{display:block;color:var(--muted);font-size:11px}.event-reaction strong{font:700 14px/1.3 'SFMono-Regular',Consolas,monospace}.news-list-heading{margin:16px 0 4px;color:#244b78;font-size:14px}.news-entry{padding:12px 0}.news-entry+.news-entry{border-top:1px solid #cbdcf1}.news-entry[hidden]{display:none}.news-time{color:var(--muted);font:600 12px/1.4 'SFMono-Regular',Consolas,monospace}.news-title{display:block;margin:4px 0 5px;color:#173f7a;font-size:15px;font-weight:650}.news-meta{margin:4px 0 0;color:#52647b;font-size:13px}.news-source-link{display:inline-block;margin-top:7px;font-size:13px;font-weight:650}.news-expand,.all-day-button{margin-top:10px;padding:7px 12px;border:1px solid #8eb7ea;border-radius:8px;background:#fff;color:#174d88;font:650 13px/1.2 inherit;cursor:pointer}.market-interpretation{margin-top:14px;padding-top:12px;border-top:1px solid #cbdcf1}.attribution-line{margin-top:9px;color:#244b78;font-weight:650}.unexplained-message{margin:14px 0 6px;color:#334155;font-weight:650}
+.chart-figure{margin:0;max-width:100%;overflow-x:auto;border:1px solid var(--line);border-radius:16px;background:#fff}.chart-figure svg{display:block;width:100%;height:auto;min-width:1040px}.unmatched-band-hit{cursor:pointer;pointer-events:all;outline:none;fill:transparent;stroke:transparent;stroke-width:2}.unmatched-band-hit:hover,.unmatched-band-hit:focus,.unmatched-band-hit.is-active{fill:rgba(148,163,184,.18);stroke:#64748b}.news-marker.is-active .marker-tag{fill:#dbeafe;stroke:#1d4ed8}.news-marker.is-active .marker-dot{r:7}
+.trump-card{width:100%;margin:20px 0 0;padding:20px 22px;border:1px solid var(--line);border-radius:14px;background:#fff}.trump-card h2{margin-bottom:10px}.trump-statement{padding:14px 0}.trump-statement+.trump-statement{border-top:1px solid var(--line)}.statement-meta{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;margin-bottom:7px;color:var(--muted);font-size:13px}.statement-meta time{font-family:'SFMono-Regular',Consolas,monospace}.topic-list{display:flex;flex-wrap:wrap;gap:6px}.topic-chip{display:inline-flex;padding:3px 8px;border-radius:999px;background:#edf4ff;color:#24518a;font-size:12px;line-height:1.35}.statement-text{margin:0;color:#2f4058}.statement-sources{margin:8px 0 0}.statement-sources li{margin:4px 0;color:#52647b;font-size:13px}
+.summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:20px 0 0}.summary-card{padding:20px 22px;border:1px solid var(--line);border-radius:14px;background:#fff}.summary-card h2{margin-bottom:10px}.summary-card ul{margin-bottom:0}.summary-card li{color:#3d4e65}
+.audit-link{margin-top:34px;padding-top:22px;border-top:1px solid var(--line)}.audit-link a{display:inline-flex;padding:10px 15px;border:1px solid #b9c8db;border-radius:10px;background:#fff;color:#244b78;font-weight:650;text-decoration:none}.audit-link a:hover{background:#f5f8fc}
+.table-wrap{overflow-x:auto;margin:14px 0 26px;border:1px solid var(--line);border-radius:10px}table{width:100%;border-collapse:collapse;font-size:14px;white-space:nowrap}th,td{padding:9px 11px;border-bottom:1px solid #e6ebf1}
+@media(max-width:820px){body{padding:0;background:#fff}.report-shell{padding:26px 16px 30px;border:0;border-radius:0;box-shadow:none}.executive-summary,.forecast-card,.price-layer-card{padding:18px 16px}.forecast-grid,.forecast-evidence-grid,.price-layer-grid{grid-template-columns:1fr}.context-grid{grid-template-columns:1fr}.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.event-reactions{grid-template-columns:repeat(2,minmax(0,1fr))}.summary-grid{grid-template-columns:1fr}.chart-figure{margin-left:-16px;margin-right:-16px;border-radius:0;padding:0 16px;border-left:0;border-right:0}h1{font-size:25px}.metric-value{font-size:22px}.news-panel{padding:16px 14px}.trump-card,.summary-card{padding:18px 16px}.statement-meta{align-items:flex-start;flex-direction:column}}
+@media print{body{padding:0;background:#fff}.report-shell{max-width:none;padding:0;border:0;box-shadow:none}.chart-figure svg{min-width:0}.news-panel{display:none}a{color:inherit;text-decoration:none}}
+</style></head><body class="formal-report">
+<main class="report-shell"><h1>金十-Brent滚动日报（缓存复盘版）（20261127 08:00）</h1>
+<section class="executive-summary" aria-label="今日重点"><h2>今日重点</h2><ul>
+<li data-summary-item="true"><strong>沙特吉赞炼厂遇袭后部分作业暂停</strong>。金十援引沙特通讯社及能源部消息称，沙特吉赞炼厂遭袭后部分作业暂停，火势已受控，造成一人死亡、多人受伤。此前沙特主导的联军将袭击归因于胡塞武装。停运范围和恢复时间仍待确认。 <a href="https://flash.jin10.com/detail/20261126224726384800" target="_blank" rel="noopener noreferrer">11-26 22:47:26 金十原文</a> · <a href="https://flash.jin10.com/detail/20261127021000087800" target="_blank" rel="noopener noreferrer">11-27 02:10:00 金十原文</a></li>
+<li data-summary-item="true"><strong>霍尔木兹海峡一艘出港油轮遭击中</strong>。金十转述英国海事贸易行动办公室（UKMTO）通报，阿曼海塞卜以东约 18 海里处，一艘出港油轮遭不明发射物击中。通报称船员安全，当时尚无环境影响报告。 <a href="https://flash.jin10.com/detail/20261126195821673800" target="_blank" rel="noopener noreferrer">11-26 19:58:21 金十原文</a></li>
+<li data-summary-item="true"><strong>OPEC+ 讨论延续现行产量目标</strong>。金十援引代表称，联盟先讨论将现行配额延至 1 月；随后援引知情人士报道，讨论范围可能至少延至 2027 年第一季度。周日会议前仍在磋商。 <a href="https://flash.jin10.com/detail/20261126192844530800" target="_blank" rel="noopener noreferrer">11-26 19:28:44 金十原文</a> · <a href="https://flash.jin10.com/detail/20261126221323879800" target="_blank" rel="noopener noreferrer">11-26 22:13:23 金十原文</a></li>
+</ul></section>
+<div class="report-meta">
+<p>新闻覆盖状态：COMPLETE。行情覆盖单独核验。</p>
+<p>统计窗口：2026-11-26 08:00 至 2026-11-27 08:00（Asia/Shanghai）</p>
+<p>新闻范围：2026-11-26 08:00 至 2026-11-27 08:00（不含截止时刻）</p>
+<p>数据来源：金十数据快讯｜Yahoo Finance / BZ=F / 5m｜金十数据特朗普专栏｜ISW Iran Update（仅用于后续监测）</p>
+<p>行情观测：<a href="https://finance.yahoo.com/quote/BZ%3DF/" target="_blank" rel="noopener noreferrer">Yahoo Finance / BZ=F / 5m</a> · 最后一根 K 线起始于 2026-11-26 12:55:00（Asia/Shanghai）</p>
+</div>
+<blockquote>本次Brent行情未达到正式日报门槛（统计窗口价格首尾未完整覆盖、统计窗口内K线存在较大缺口）。价格表现与短线归因仅供缓存复盘参考。</blockquote>
+<section class="market-lede" aria-label="本窗口市场主线"><h2>本窗口市场主线</h2>
+<p>Brent本窗口整体上涨 +0.55%。</p>
+<p>最主要交易逻辑：暂无足够明确的单一交易主线。</p>
+<p>已解释异动 0 段，未解释异动 1 段。</p>
+</section>
+<h2 class="section-title">Brent关键指标</h2>
+<div class="metric-grid" aria-label="Brent关键指标">
+<div class="metric-card"><span class="metric-label">最新价</span><span class="metric-value">91.17</span></div>
+<div class="metric-card"><span class="metric-label">24小时涨跌幅</span><span class="metric-value metric-up">+0.55%</span></div>
+<div class="metric-card"><span class="metric-label">日内最高价</span><span class="metric-value">91.24</span></div>
+<div class="metric-card"><span class="metric-label">日内最低价</span><span class="metric-value">90.49</span></div>
+</div>
+<figure class="chart-figure" aria-label="Brent 24小时30分钟K线与关键新闻事件"><svg xmlns="http://www.w3.org/2000/svg" width="1440" height="650" viewBox="0 0 1440 650" role="img" aria-labelledby="chart-title chart-desc">
+<style>
+text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif;fill:#172033}
+.mono{font-family:'SFMono-Regular',Consolas,'Liberation Mono',monospace}
+.axis{font-size:12px;fill:#64748B}.small{font-size:11px;fill:#64748B}.label{font-size:12px;font-weight:700}.title{font-size:22px;font-weight:750}.subtitle{font-size:12px;fill:#475569}
+.news-marker{cursor:pointer;outline:none}.news-marker .marker-tag{transition:fill .15s,stroke .15s}.news-marker:hover .marker-tag,.news-marker:focus .marker-tag,.news-marker.is-active .marker-tag{fill:#DBEAFE;stroke:#1D4ED8}.news-marker:hover .marker-dot,.news-marker:focus .marker-dot,.news-marker.is-active .marker-dot{r:7}
+</style>
+<rect width="1440" height="650" rx="16" fill="#FFFFFF"/>
+<rect x="1" y="1" width="1438" height="648" rx="15" fill="none" stroke="#D8E1EA"/>
+<text id="chart-title" x="92" y="34" class="title">Brent 24小时价格走势</text>
+<text id="chart-desc" x="92" y="57" class="subtitle">2026-11-26 08:00 至 2026-11-27 08:00（北京时间）｜30分钟K线｜10根有效K线</text>
+<rect x="92" y="75" width="12" height="12" fill="#C2413B"/><text x="111" y="85" class="small">上涨</text>
+<rect x="165" y="75" width="12" height="12" fill="#1B7F5A"/><text x="184" y="85" class="small">下跌</text>
+<circle cx="246" cy="81" r="5" fill="#2563EB"/><text x="258" y="85" class="small">可点击新闻时间</text>
+<rect x="372" y="74" width="15" height="13" rx="2" fill="#CBD5E1" opacity="0.55"/><text x="395" y="85" class="small">暂无直接新闻解释</text>
+<rect x="92" y="118" width="1268" height="432" fill="#FBFCFE" stroke="#E2E8F0"/>
+<rect class="unmatched-band" x="241.7" y="118.0" width="26.4" height="432.0" fill="#94A3B8" opacity="0.11"><title>10:50–11:20 暂无直接新闻解释</title></rect>
+<line x1="92.0" y1="459.8" x2="1360.0" y2="459.8" stroke="#E5EAF0" stroke-width="1"/>
+<text x="82.0" y="463.8" text-anchor="end" class="axis mono">90.60</text>
+<line x1="92.0" y1="364.9" x2="1360.0" y2="364.9" stroke="#E5EAF0" stroke-width="1"/>
+<text x="82.0" y="368.9" text-anchor="end" class="axis mono">90.80</text>
+<line x1="92.0" y1="269.9" x2="1360.0" y2="269.9" stroke="#E5EAF0" stroke-width="1"/>
+<text x="82.0" y="273.9" text-anchor="end" class="axis mono">91.00</text>
+<line x1="92.0" y1="175.0" x2="1360.0" y2="175.0" stroke="#E5EAF0" stroke-width="1"/>
+<text x="82.0" y="179.0" text-anchor="end" class="axis mono">91.20</text>
+<line x1="92.0" y1="118.0" x2="92.0" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="92.0" y="574.0" text-anchor="start" class="axis mono">11-26 08:00</text>
+<line x1="197.7" y1="118.0" x2="197.7" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="197.7" y="574.0" text-anchor="middle" class="axis mono">10:00</text>
+<line x1="303.3" y1="118.0" x2="303.3" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="303.3" y="574.0" text-anchor="middle" class="axis mono">12:00</text>
+<line x1="409.0" y1="118.0" x2="409.0" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="409.0" y="574.0" text-anchor="middle" class="axis mono">14:00</text>
+<line x1="514.7" y1="118.0" x2="514.7" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="514.7" y="574.0" text-anchor="middle" class="axis mono">16:00</text>
+<line x1="620.3" y1="118.0" x2="620.3" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="620.3" y="574.0" text-anchor="middle" class="axis mono">18:00</text>
+<line x1="726.0" y1="118.0" x2="726.0" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="726.0" y="574.0" text-anchor="middle" class="axis mono">20:00</text>
+<line x1="831.7" y1="118.0" x2="831.7" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="831.7" y="574.0" text-anchor="middle" class="axis mono">22:00</text>
+<line x1="937.3" y1="118.0" x2="937.3" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="937.3" y="574.0" text-anchor="middle" class="axis mono">11-27 00:00</text>
+<line x1="1043.0" y1="118.0" x2="1043.0" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="1043.0" y="574.0" text-anchor="middle" class="axis mono">02:00</text>
+<line x1="1148.7" y1="118.0" x2="1148.7" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="1148.7" y="574.0" text-anchor="middle" class="axis mono">04:00</text>
+<line x1="1254.3" y1="118.0" x2="1254.3" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="1254.3" y="574.0" text-anchor="middle" class="axis mono">06:00</text>
+<line x1="1360.0" y1="118.0" x2="1360.0" y2="550.0" stroke="#EDF1F5" stroke-width="1"/>
+<text x="1360.0" y="574.0" text-anchor="end" class="axis mono">11-27 08:00</text>
+<g><title>2026-11-26 08:00 北京时间 | O 90.67 H 90.74 L 90.64 C 90.64 | 5根5分钟K线</title><line x1="105.2" y1="393.3" x2="105.2" y2="440.8" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="96.2" y="426.6" width="18.0" height="14.2" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-26 08:30 北京时间 | O 90.71 H 90.72 L 90.63 C 90.63 | 5根5分钟K线</title><line x1="131.6" y1="402.8" x2="131.6" y2="445.6" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="122.6" y="407.6" width="18.0" height="38.0" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-26 09:00 北京时间 | O 90.76 H 91.24 L 90.75 C 90.93 | 6根5分钟K线</title><line x1="158.0" y1="156.0" x2="158.0" y2="388.6" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="149.1" y="303.1" width="18.0" height="80.7" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-26 09:30 北京时间 | O 90.94 H 90.94 L 90.66 C 90.70 | 6根5分钟K线</title><line x1="184.5" y1="298.4" x2="184.5" y2="431.3" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="175.5" y="298.4" width="18.0" height="113.9" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-26 10:00 北京时间 | O 90.67 H 90.90 L 90.60 C 90.62 | 6根5分钟K线</title><line x1="210.9" y1="317.4" x2="210.9" y2="459.8" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="201.9" y="426.6" width="18.0" height="23.7" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-26 10:30 北京时间 | O 90.63 H 90.89 L 90.49 C 90.67 | 6根5分钟K线</title><line x1="237.3" y1="322.1" x2="237.3" y2="512.0" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="228.3" y="426.6" width="18.0" height="19.0" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-26 11:00 北京时间 | O 90.69 H 91.10 L 90.68 C 91.08 | 6根5分钟K线</title><line x1="263.7" y1="222.4" x2="263.7" y2="421.8" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="254.7" y="231.9" width="18.0" height="185.1" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-26 11:30 北京时间 | O 91.10 H 91.20 L 90.98 C 91.09 | 6根5分钟K线</title><line x1="290.1" y1="175.0" x2="290.1" y2="279.4" stroke="#1B7F5A" stroke-width="1.4"/>
+<rect x="281.1" y="222.4" width="18.0" height="4.7" fill="#1B7F5A" stroke="#1B7F5A" rx="0.8"/></g>
+<g><title>2026-11-26 12:00 北京时间 | O 91.00 H 91.18 L 91.00 C 91.07 | 5根5分钟K线</title><line x1="316.5" y1="184.5" x2="316.5" y2="269.9" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="307.6" y="236.7" width="18.0" height="33.2" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<g><title>2026-11-26 12:30 北京时间 | O 91.10 H 91.21 L 91.10 C 91.17 | 4根5分钟K线</title><line x1="343.0" y1="170.2" x2="343.0" y2="222.4" stroke="#C2413B" stroke-width="1.4"/>
+<rect x="334.0" y="189.2" width="18.0" height="33.2" fill="#C2413B" stroke="#C2413B" rx="0.8"/></g>
+<rect x="1025" y="69" width="335" height="25" rx="6" fill="#F8FAFC" stroke="#D8E1EA"/>
+<text x="1192.5" y="86" text-anchor="middle" class="small mono">最新30分钟  O 91.10  H 91.21  L 91.10  C 91.17</text>
+<text x="92" y="622" class="small">新闻时间点仅来自既有匹配结果；浅灰区域不作新闻归因。K线空缺时段留白。</text>
+<text x="1360" y="622" text-anchor="end" class="small">价格源：Yahoo Finance / BZ=F / 5m</text>
+<rect class="unmatched-band-hit" x="241.7" y="118.0" width="26.4" height="432.0" role="button" tabindex="0" focusable="true" data-event-key="event-20261126t1050-20261126t1120" aria-label="10:50–11:20，查看该时段重要新闻" fill="transparent"/></svg></figure>
+<div id="related-news-panel" class="news-panel" aria-live="polite"><p class="news-panel-empty">点击上方K线图中的蓝色新闻时间点，查看该时段的相关新闻与市场解读。</p></div>
+<section id="trump-card" class="trump-card"><h2>特朗普相关言论</h2>
+<article class="trump-statement" data-trump-statement="true">
+<div class="statement-meta">
+<time>2026-11-26 14:04:46 北京时间</time>
+<span class="topic-list">
+<span class="topic-chip">伊朗</span>
+<span class="topic-chip">战争与军事行动</span>
+</span>
+</div>
+<p class="statement-text">特朗普警告民主党勿提前结束伊朗战争，否则“胜利”变为“失败” 特朗普称美国对伊的军事行动资金大致可维持至明年1月底，但民主党可能迫使战争提前结束，届时可能会将“一场彻底的胜利”变成“一场失败”。</p>
+<ul class="statement-sources">
+<li><a href="https://xnews.jin10.com/webapp/details.html?id=236179&amp;type=news&amp;data_type=0" target="_blank" rel="noopener noreferrer">特朗普警告民主党勿提前结束伊朗战争，否则“胜利”变为“失败” ↗</a></li>
+</ul>
+</article>
+</section>
+<div class="summary-grid">
+<section id="iran-update-card" class="summary-card"><h2>ISW Iran Update</h2><ul>
+<li>本次ISW抓取失败，以下内容待下次运行补充。 失败原因：本次新闻日报未重新核对该独立背景源。 <a href="https://understandingwar.org/research/?_teams=middle-east&amp;_focus_area_filter=iran-proxies&amp;_product_line_filter=iran-update" target="_blank" rel="noopener noreferrer">查看ISW列表 ↗</a></li>
+</ul></section>
+<section id="tracking-card" class="summary-card"><h2>今日关注什么</h2><ul>
+<li>沙特吉赞炼厂实际停运范围、复产时间及成品油装船情况。</li>
+<li>涉事油轮损伤、通航和后续 UKMTO 通告。</li>
+<li>OPEC+ 周日会议正式声明及西非 1 月装船表。</li>
+</ul></section></div>
+<section class="summary-card"><h2>新闻专题</h2>
+<h3>其他供应与政策进展</h3>
+<h4>安哥拉下调 1 月原油出口安排</h4>
+<p>金十快讯称，安哥拉下调 1 月原油出口安排，降至至少 2008 年以来最低水平。该快讯未提供具体装船量。</p>
+<p><a href="https://flash.jin10.com/detail/20261126233602669800" target="_blank" rel="noopener noreferrer">11-26 23:36:02 金十原文</a></p>
+<h4>卡塔尔 LNG 出口回升</h4>
+<p>金十援引 Kpler 数据称，卡塔尔拉斯拉凡 11 月以来平均每日约出口 1.4 船 LNG，较上月增加约四分之一，约为冲突前的一半。</p>
+<p><a href="https://flash.jin10.com/detail/20261126170509283800" target="_blank" rel="noopener noreferrer">11-26 17:05:09 金十原文</a></p>
+<h4>俄罗斯炼厂起火，乌克兰称发动袭击</h4>
+<p>金十援引国际文传电讯社称，俄罗斯克拉斯诺达尔地区 Slavyansk-Eco 炼厂在无人机袭击后起火。乌克兰随后称其实施了袭击。炼厂停运时长和加工量损失尚待确认。</p>
+<p><a href="https://flash.jin10.com/detail/20261126215953041800" target="_blank" rel="noopener noreferrer">11-26 21:59:53 金十原文</a> · <a href="https://flash.jin10.com/detail/20261126233350131800" target="_blank" rel="noopener noreferrer">11-26 23:33:50 金十原文</a></p>
+<h4>特朗普谈伊朗与俄乌冲突</h4>
+<p>金十引述特朗普称，美国已额外向相关地区派遣一艘航母。特朗普此前表示与北约秘书长讨论了伊朗及俄乌冲突。这些是公开表态，实际部署及能源运输变化需另行核实。</p>
+<p><a href="https://flash.jin10.com/detail/20261126222029569800" target="_blank" rel="noopener noreferrer">11-26 22:20:29 金十原文</a> · <a href="https://flash.jin10.com/detail/20261127075211206800" target="_blank" rel="noopener noreferrer">11-27 07:52:11 金十原文</a></p>
+<h3>可能的能源市场影响</h3>
+<p><strong>沙特吉赞炼厂遇袭后部分作业暂停。</strong> 可能影响当地燃料供应和炼厂原油采购。原油出口装船是否受影响仍待确认。</p>
+<p><strong>霍尔木兹海峡一艘出港油轮遭击中。</strong> 如后续出现船舶延误、改道或保险费用上涨，可能增加海湾原油的运输成本。</p>
+<p><strong>OPEC+ 讨论延续现行产量目标。</strong> 会议结果将影响市场对明年初计划供应量的判断，实际产量仍需结合成员履约和运输情况观察。</p>
+<p><strong>安哥拉下调 1 月原油出口安排。</strong> 若出口计划兑现，可供买家选择的部分西非现货原油可能减少。</p>
+<p><strong>卡塔尔 LNG 出口回升。</strong> 这反映了部分海湾能源出口恢复。LNG 和原油的装船条件与目的地需分别跟踪。</p>
+<p><strong>俄罗斯炼厂起火，乌克兰称发动袭击。</strong> 若停运持续，影响可能先体现在区域成品油供应和炼厂原油加工量。</p>
+<p><strong>特朗普谈伊朗与俄乌冲突。</strong> 关注有关表态是否伴随航运通告、制裁规则或实际装船变化。</p>
+<h3>Brent 行情覆盖</h3>
+<p>Yahoo Finance BZ=F 可用 K 线仅覆盖至 11 月 26 日 12:55，窗口内另有一处 15 分钟间隔。行情审计未通过截止覆盖检查，图表仅表示已有观测，本期省略全窗涨跌和新闻归因。</p>
+</section>
+
+<script type="application/json" id="brent-event-data">[{"key":"event-20261126t1050-20261126t1120","kind":"unexplained","start":"2026-11-26 10:50","end":"2026-11-26 11:20","time_range":"北京时间 10:50–11:20","direction":"上涨","cumulative":"+0.53%","max_30m":"+0.53%","pct_5m":"+0.18%","pct_15m":"+0.31%","pct_30m":"+0.53%","pct_60m":"+0.73%","news":[{"time":"2026-11-26 11:30","title":"日本首次接收来自马来西亚的生物液化天然气，标志着日本在推动能源结构脱碳方面迈出一步。日本目前的能源结构仍以化石燃料为主。 根据东京燃气周四发布的一份声明，该公司已从马来西亚国有企业国家石油公司（Petronas）接收约4万立方米...","url":"https://flash.jin10.com/detail/20261126113031569800","relation":"价格先于新闻","freshness":"新增事实","judgment":"相关背景，未作价格归因","confidence":"低"}],"interpretation":"","judgment":"相关背景，未作价格归因","confidence":"低"}]</script>
+<script type="application/json" id="brent-panel-data">{"presentation_available":true,"panel_groups":[{"key":"event-20261126t1050-20261126t1120","time_range":"10:50–11:20","direction":"上涨","cumulative":"+0.53%","pct_5m":"+0.18%","pct_15m":"+0.31%","pct_30m":"+0.53%","pct_60m":"+0.73%","max_30m":"+0.53%","is_unexplained":true,"interpretation":"新闻或价格窗口覆盖不完整；本段仅为缓存数据复盘，不能确认核心驱动。","news":[{"id":"20261126113031569800","time":"2026-11-26 11:30","title":"日本首次接收马来西亚生物液化天然气","summary":"【日本首次接收马来西亚生物液化天然气】金十数据11月26日讯， 日本首次接收来自马来西亚的生物液化天然气，标志着日本在推动能源结构脱碳方面迈出一步。日本目前的能源结构仍以化石燃料为主。 根据东京燃气周四发布的一份声明，该公司已从马来西亚国...","url":"https://flash.jin10.com/detail/20261126113031569800","impact":"偏多：LNG供应或采购压力可能增强区域能源安全担忧，但对Brent传导需继续观察。","price_status":"无法判断","relation":"价格先于新闻","judgment":"价格先于新闻，不作该段归因","confidence":"低","reaction_status":"CONFIRMED","reaction_status_note":"","event_group_id":"event_group_001","role":"primary","destinations":["价格异动组 10:50–11:20"]}]}],"unmatched_major_items":[{"id":"20261126190240680800","time":"2026-11-26 19:02","title":"欧佩克+代表：欧佩克+考虑将现行配额延续至1月。","summary":"欧佩克+代表：欧佩克+考虑将现行配额延续至1月。","url":"https://flash.jin10.com/detail/20261126190240680800","impact":"暂未发现可直接匹配的Brent显著异动，需持续关注后续影响。","price_status":"未匹配显著异动","relation":"未匹配显著异动","judgment":"⚠ 重大事件","confidence":"低","reaction_status":"UNCONFIRMED","reaction_status_note":"","event_group_id":"event_group_002","role":"primary","destinations":["⚠ 重大事件"]},{"id":"20261126195821673800","time":"2026-11-26 19:58","title":"英国海事贸易组织：收到一份关于阿曼海塞卜以东18海里处发生事件的报告。当地有关部门报告称，一艘出港油轮在通过霍尔木兹海峡时被不明发射物击中…","summary":"英国海事贸易组织：收到一份关于阿曼海塞卜以东18海里处发生事件的报告。当地有关部门报告称，一艘出港油轮在通过霍尔木兹海峡时被不明发射物击中。船员均已确认安全，目前尚未收到环境影响报告。","url":"https://flash.jin10.com/detail/20261126195821673800","impact":"暂未发现可直接匹配的Brent显著异动，需持续关注后续影响。","price_status":"未匹配显著异动","relation":"未匹配显著异动","judgment":"⚠ 重大事件","confidence":"低","reaction_status":"UNCONFIRMED","reaction_status_note":"","event_group_id":"event_group_003","role":"primary","destinations":["⚠ 重大事件"]},{"id":"20261126224726384800","time":"2026-11-26 22:47","title":"沙特领导的联军：也门胡塞武装袭击了吉赞炼油厂。","summary":"沙特领导的联军：也门胡塞武装袭击了吉赞炼油厂。","url":"https://flash.jin10.com/detail/20261126224726384800","impact":"暂未发现可直接匹配的Brent显著异动，需持续关注后续影响。","price_status":"未匹配显著异动","relation":"未匹配显著异动","judgment":"⚠ 重大事件","confidence":"低","reaction_status":"UNCONFIRMED","reaction_status_note":"","event_group_id":"event_group_004","role":"primary","destinations":["⚠ 重大事件"]},{"id":"20261126233944342800","time":"2026-11-26 23:39","title":"沙特吉赞炼油厂遭也门胡塞武装袭击","summary":"【沙特吉赞炼油厂遭也门胡塞武装袭击】金十数据11月26日讯，沙特阿拉伯主导的多国联军26日说，位于沙特西南部的吉赞炼油厂遭也门胡塞武装袭击。多国联军发言人图尔基·马利基当天在社交媒体上发布声明说，针对平民和民用设施的袭击将招致坚决的军事回...","url":"https://flash.jin10.com/detail/20261126233944342800","impact":"暂未发现可直接匹配的Brent显著异动，需持续关注后续影响。","price_status":"未匹配显著异动","relation":"未匹配显著异动","judgment":"⚠ 重大事件","confidence":"低","reaction_status":"UNCONFIRMED","reaction_status_note":"","event_group_id":"event_group_005","role":"primary","destinations":["⚠ 重大事件"]},{"id":"20261127021000087800","time":"2026-11-27 02:10","title":"沙特称吉赞炼油厂遭袭后部分作业暂停","summary":"【沙特称吉赞炼油厂遭袭后部分作业暂停】金十数据11月27日讯，据沙特通讯社报道，沙特能源部一名消息人士表示，周四，一枚敌对空中飞行物击中沙特吉赞地区一座炼油厂，引发火灾，火势随后得到控制。袭击发生后，该炼油厂部分作业暂时停止。该消息人士补...","url":"https://flash.jin10.com/detail/20261127021000087800","impact":"暂未发现可直接匹配的Brent显著异动，需持续关注后续影响。","price_status":"未匹配显著异动","relation":"未匹配显著异动","judgment":"⚠ 重大事件","confidence":"低","reaction_status":"UNCONFIRMED","reaction_status_note":"","event_group_id":"event_group_005","role":"material_escalation","destinations":["⚠ 重大事件"]}],"all_day_items":[{"id":"20261126113031569800","time":"2026-11-26 11:30","title":"日本首次接收马来西亚生物液化天然气","summary":"【日本首次接收马来西亚生物液化天然气】金十数据11月26日讯， 日本首次接收来自马来西亚的生物液化天然气，标志着日本在推动能源结构脱碳方面迈出一步。日本目前的能源结构仍以化石燃料为主。 根据东京燃气周四发布的一份声明，该公司已从马来西亚国...","url":"https://flash.jin10.com/detail/20261126113031569800","impact":"偏多：LNG供应或采购压力可能增强区域能源安全担忧，但对Brent传导需继续观察。","price_status":"无法判断","relation":"价格先于新闻","judgment":"价格先于新闻，不作该段归因","confidence":"低","reaction_status":"CONFIRMED","reaction_status_note":"","event_group_id":"event_group_001","role":"primary","destinations":["价格异动组 10:50–11:20"]}],"display_summary":{"displayed_news_count":6,"event_group_count":5,"primary_count":5,"material_escalation_count":1,"merged_count":2,"over_30_reason":"","text":"今日展示 6 条重要新闻：5 个独立事件，1 条实质升级；均为通过硬条件的独立事实，未为凑数量加入弱相关新闻。"}}</script>
+</main>
+<script>
+(() => {
+  const panel = document.getElementById('related-news-panel');
+  const panelDataNode = document.getElementById('brent-panel-data');
+  if (!panel || !panelDataNode) return;
+  let panelData = {};
+  try { panelData = JSON.parse(panelDataNode.textContent || '{}'); } catch (error) { panelData = {}; }
+  const panelGroups = Array.isArray(panelData.panel_groups) ? panelData.panel_groups : [];
+  const unmatchedMajorItems = Array.isArray(panelData.unmatched_major_items) ? panelData.unmatched_major_items : [];
+  const allDayItems = Array.isArray(panelData.all_day_items) ? panelData.all_day_items : [];
+  const displaySummary = panelData.display_summary && typeof panelData.display_summary === 'object' ? panelData.display_summary : {};
+  const addText = (tag, className, value) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    node.textContent = value || '';
+    return node;
+  };
+  const validJin10Url = (value) => {
+    try {
+      const url = new URL(String(value || ''));
+      return (url.protocol === 'http:' || url.protocol === 'https:')
+        && (url.hostname === 'jin10.com' || url.hostname.endsWith('.jin10.com')) ? url.href : '';
+    } catch (error) {
+      return '';
+    }
+  };
+  const appendNews = (news, attributionLabel = '') => {
+    const entry = document.createElement('article');
+    entry.className = 'news-entry';
+    entry.appendChild(addText('div', 'news-time', (news.time || 'N/A') + ' 北京时间'));
+    entry.appendChild(addText('h5', 'news-title', news.title || '重大新闻'));
+    if (news.summary) entry.appendChild(addText('p', 'news-meta', news.summary));
+    entry.appendChild(addText('p', 'news-meta', '影响说明：' + (news.impact || 'N/A')));
+    entry.appendChild(addText('p', 'news-meta', '价格状态：' + (news.price_status || 'N/A')));
+    entry.appendChild(addText('p', 'news-meta', '反应状态：' + (news.reaction_status || 'UNCONFIRMED')));
+    if (news.reaction_status_note) entry.appendChild(addText('p', 'news-meta', news.reaction_status_note));
+    if (attributionLabel) entry.appendChild(addText('p', 'attribution-line', attributionLabel));
+    const url = validJin10Url(news.url);
+    if (url) {
+      const link = document.createElement('a');
+      link.className = 'news-source-link';
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = '查看金十原文 ↗';
+      entry.appendChild(link);
+    }
+    panel.appendChild(entry);
+  };
+  const appendGroup = (group) => {
+    panel.appendChild(addText('h4', 'news-list-heading', (group.time_range || '价格异动') + '｜Brent' + (group.direction || '') + ' ' + (group.cumulative || '')));
+    const summary = document.createElement('div');
+    summary.className = 'event-summary';
+    summary.appendChild(addText('span', '', group.max_30m === 'N/A' ? '最大30分钟：N/A' : '最大30分钟涨跌幅：' + (group.max_30m || 'N/A')));
+    panel.appendChild(summary);
+    const reactions = document.createElement('div');
+    reactions.className = 'event-reactions';
+    [['5分钟', group.pct_5m], ['15分钟', group.pct_15m], ['30分钟', group.pct_30m], ['60分钟', group.pct_60m], ['本轮累计', group.cumulative]].forEach(([label, value]) => {
+      const card = document.createElement('div');
+      card.className = 'event-reaction';
+      card.appendChild(addText('span', '', label));
+      card.appendChild(addText('strong', '', value || 'N/A'));
+      reactions.appendChild(card);
+    });
+    panel.appendChild(reactions);
+    const news = Array.isArray(group.news) ? group.news : [];
+    if (group.is_unexplained) {
+      panel.appendChild(addText('p', 'unexplained-message', news.length
+        ? '该段波动原因暂无法确认；以下新闻仅作相关背景，不作价格归因。'
+        : '暂未找到符合条件的金十新闻，原因暂无法确认，需人工继续核查。'));
+    } else if (group.interpretation) {
+      panel.appendChild(addText('p', 'market-interpretation', group.interpretation));
+    }
+    panel.appendChild(addText('h4', 'news-list-heading', group.is_unexplained ? '该时段相关背景（未作价格归因）' : '该时段重要新闻'));
+    if (news.length) news.forEach((item) => appendNews(item, group.is_unexplained ? '相关背景，未作价格归因' : ''));
+    else panel.appendChild(addText('p', 'unexplained-message', '暂未找到符合条件的金十新闻，原因暂无法确认，需人工继续核查。'));
+  };
+  const appendUnmatchedMajorItems = () => {
+    if (!unmatchedMajorItems.length) return;
+    panel.appendChild(addText('h4', 'news-list-heading', '⚠ 重大事件'));
+    unmatchedMajorItems.forEach(appendNews);
+  };
+  const panelByKey = new Map(panelGroups.map((group) => [group.key, group]));
+  const triggers = [...document.querySelectorAll('[data-event-key]')];
+  const clearActive = () => triggers.forEach((item) => item.classList.remove('is-active'));
+  const renderAllDay = () => {
+    clearActive();
+    panel.replaceChildren();
+    panel.appendChild(addText('h3', 'news-panel-title', '全日重要新闻'));
+    if (displaySummary.text) panel.appendChild(addText('p', 'news-display-summary', displaySummary.text));
+    if (allDayItems.length) allDayItems.forEach(appendNews);
+    else if (!unmatchedMajorItems.length) panel.appendChild(addText('p', 'unexplained-message', '本窗口暂无符合展示口径的新闻。'));
+    appendUnmatchedMajorItems();
+  };
+  const buildAllDayButton = () => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'all-day-button';
+    button.textContent = '查看全日重要新闻';
+    button.addEventListener('click', renderAllDay);
+    return button;
+  };
+  const showGroup = (key) => {
+    const group = panelByKey.get(key);
+    if (!group) return;
+    clearActive();
+    triggers.filter((item) => item.getAttribute('data-event-key') === key).forEach((item) => item.classList.add('is-active'));
+    panel.replaceChildren();
+    panel.appendChild(buildAllDayButton());
+    appendGroup(group);
+  };
+  if (panelData.presentation_available) {
+    triggers.forEach((trigger) => {
+      const show = () => showGroup(trigger.getAttribute('data-event-key') || '');
+      trigger.addEventListener('click', show);
+      trigger.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          show();
+        }
+      });
+    });
+    renderAllDay();
+    return;
+  }
+  const dataNode = document.getElementById('brent-event-data');
+  if (!dataNode) return;
+  let events = [];
+  try { events = JSON.parse(dataNode.textContent || '[]'); } catch (error) { events = []; }
+  const byKey = new Map(events.map((item) => [item.key, item]));
+  const showEvent = (trigger) => {
+    const item = byKey.get(trigger.getAttribute('data-event-key') || '');
+    if (!item) return;
+    clearActive();
+    trigger.classList.add('is-active');
+    panel.replaceChildren();
+    const heading = addText('h3', 'news-panel-title', item.time_range + '｜Brent' + item.direction + ' ' + item.cumulative);
+    panel.appendChild(heading);
+    if(item.kind==='unexplained'){
+      const backgroundNews = Array.isArray(item.news) ? item.news : [];
+      panel.appendChild(addText('p', 'unexplained-message', backgroundNews.length
+        ? '该段波动原因暂无法确认；以下新闻仅作相关背景，不作价格归因。'
+        : '暂未找到符合条件的金十新闻，原因暂无法确认，需人工继续核查。'));
+      panel.appendChild(addText('p', 'attribution-line', '归因：暂无法确认｜置信度：低'));
+      if (backgroundNews.length) {
+        panel.appendChild(addText('h4', 'news-list-heading', '该时段相关背景（未作价格归因）'));
+        backgroundNews.forEach((news) => {
+          const entry = document.createElement('article');
+          entry.className = 'news-entry';
+          entry.appendChild(addText('div', 'news-time', (news.time || 'N/A') + ' 北京时间'));
+          const title = document.createElement('a');
+          title.className = 'news-title';
+          title.href = news.url;
+          title.target = '_blank';
+          title.rel = 'noopener noreferrer';
+          title.textContent = news.title;
+          entry.appendChild(title);
+          entry.appendChild(addText('p', 'news-meta', '时间关系：' + news.relation + '｜信息新鲜度：' + news.freshness));
+          entry.appendChild(addText('p', 'attribution-line', '相关背景，未作价格归因'));
+          panel.appendChild(entry);
+        });
+      }
+      return;
+    }
+    const summary=document.createElement('div');
+    summary.className = 'event-summary';
+    summary.appendChild(addText('span', '', item.max_30m === 'N/A' ? '最大30分钟：N/A' : '最大30分钟涨跌幅：' + item.max_30m));
+    panel.appendChild(summary);
+    const reactions = document.createElement('div');
+    reactions.className = 'event-reactions';
+    [['5分钟', item.pct_5m], ['15分钟', item.pct_15m], ['30分钟', item.pct_30m], ['60分钟', item.pct_60m], ['本轮累计', item.cumulative]].forEach(([label, value]) => {
+      const card = document.createElement('div');
+      card.className = 'event-reaction';
+      card.appendChild(addText('span', '', label));
+      card.appendChild(addText('strong', '', value));
+      reactions.appendChild(card);
+    });
+    panel.appendChild(reactions);
+    panel.appendChild(addText('h4', 'news-list-heading', '该时段正式入选新闻'));
+    item.news.forEach((news, index) => {
+      const entry = document.createElement('article');
+      entry.className = 'news-entry';
+      if (index >= 2) entry.hidden = true;
+      entry.appendChild(addText('div', 'news-time', (news.time || 'N/A') + ' 北京时间'));
+      const title = document.createElement('a');
+      title.className = 'news-title';
+      title.href = news.url;
+      title.target = '_blank';
+      title.rel = 'noopener noreferrer';
+      title.textContent = news.title;
+      entry.appendChild(title);
+      entry.appendChild(addText('p', 'news-meta', '时间关系：' + news.relation + '｜信息新鲜度：' + news.freshness));
+      const link = document.createElement('a');
+      link.className = 'news-source-link';
+      link.href = news.url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = '查看金十原文 ↗';
+      entry.appendChild(link);
+      panel.appendChild(entry);
+    });
+    if (item.news.length > 2) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'news-expand';
+      button.textContent = '展开全部';
+      button.addEventListener('click', () => {
+        const hidden = button.textContent === '展开全部';
+        panel.querySelectorAll('.news-entry').forEach((entry, index) => {
+          if (index >= 2) entry.hidden = !hidden;
+        });
+        button.textContent = hidden ? '收起' : '展开全部';
+      });
+      panel.appendChild(button);
+    }
+    if (item.interpretation) panel.appendChild(addText('p', 'market-interpretation', item.interpretation));
+    panel.appendChild(addText('p', 'attribution-line', '归因：' + item.judgment + '｜置信度：' + item.confidence));
+  };
+  triggers.forEach((trigger) => {
+    trigger.addEventListener('click', () => showEvent(trigger));
+    trigger.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        showEvent(trigger);
+      }
+    });
+  });
+})();
+</script>
+</body></html>
